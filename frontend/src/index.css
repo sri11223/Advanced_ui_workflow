@@ -23,7 +23,7 @@
   }
   
   body {
-    @apply bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white font-sans antialiased;
+    @apply bg-black text-white font-sans antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
     margin: 0;
     padding: 0;
