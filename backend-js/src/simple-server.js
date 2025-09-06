@@ -9,8 +9,10 @@ const app = express();
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:5173'],
-  credentials: true
+  origin: ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
 
@@ -453,6 +455,68 @@ app.get('/api/onboarding/:userId/status', async (req, res) => {
     console.error('Onboarding status error:', error);
     res.status(500).json({ error: 'Failed to check onboarding status' });
   }
+});
+
+// Questionnaire routes
+app.post('/api/questionnaire/start', (req, res) => {
+  console.log('=== QUESTIONNAIRE START ===');
+  const { prompt } = req.body;
+  
+  const sessionId = Date.now().toString();
+  const questions = [
+    "What are the primary user goals for this interface?",
+    "What type of content will be displayed?",
+    "How many main sections do you need?",
+    "What actions should users be able to perform?"
+  ];
+  
+  res.json({
+    sessionId,
+    question: questions[0],
+    totalQuestions: questions.length,
+    currentQuestion: 1
+  });
+});
+
+app.post('/api/questionnaire/answer', (req, res) => {
+  console.log('=== QUESTIONNAIRE ANSWER ===');
+  const { sessionId, answer, currentQuestion } = req.body;
+  
+  const questions = [
+    "What are the primary user goals for this interface?",
+    "What type of content will be displayed?", 
+    "How many main sections do you need?",
+    "What actions should users be able to perform?"
+  ];
+  
+  if (currentQuestion < questions.length) {
+    res.json({
+      sessionId,
+      question: questions[currentQuestion],
+      totalQuestions: questions.length,
+      currentQuestion: currentQuestion + 1
+    });
+  } else {
+    res.json({
+      completed: true,
+      wireframe: {
+        screen: "Main Dashboard",
+        layout: { type: "grid", columns: 3 },
+        fields: ["header", "navigation", "content", "sidebar", "footer"]
+      }
+    });
+  }
+});
+
+app.post('/figma/generate', (req, res) => {
+  console.log('=== FIGMA GENERATE ===');
+  const { wireframe } = req.body;
+  
+  res.json({
+    success: true,
+    message: 'Wireframe sent to Figma',
+    figmaUrl: 'https://figma.com/generated-design'
+  });
 });
 
 // 404 handler
