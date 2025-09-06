@@ -69,6 +69,24 @@ class SupabaseDatabase:
         )
         return result.data[0] if result.data else None
     
+    async def get_project_by_id(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Get project by ID"""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.client.table("projects").select("*").eq("id", project_id).execute()
+        )
+        return result.data[0] if result.data else None
+    
+    async def get_wireframe_by_id(self, wireframe_id: str) -> Optional[Dict[str, Any]]:
+        """Get wireframe by ID"""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.client.table("wireframes").select("*").eq("id", wireframe_id).execute()
+        )
+        return result.data[0] if result.data else None
+    
     async def get_project_wireframes(self, project_id: str) -> List[Dict[str, Any]]:
         """Get all wireframes for a project"""
         loop = asyncio.get_event_loop()
@@ -77,6 +95,116 @@ class SupabaseDatabase:
             lambda: self.client.table("wireframes").select("*").eq("project_id", project_id).execute()
         )
         return result.data or []
+    
+    # Conversation operations
+    async def create_conversation(self, conversation_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new conversation"""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.client.table("conversations").insert(conversation_data).execute()
+        )
+        return result.data[0] if result.data else None
+    
+    async def get_conversation_by_id(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        """Get conversation by ID"""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.client.table("conversations").select("*").eq("id", conversation_id).execute()
+        )
+        return result.data[0] if result.data else None
+    
+    async def get_project_conversations(self, project_id: str) -> List[Dict[str, Any]]:
+        """Get all conversations for a project"""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.client.table("conversations").select("*").eq("project_id", project_id).execute()
+        )
+        return result.data or []
+    
+    # UI Components operations
+    async def get_ui_components(self, category: str = None) -> List[Dict[str, Any]]:
+        """Get UI components, optionally filtered by category"""
+        loop = asyncio.get_event_loop()
+        if category:
+            result = await loop.run_in_executor(
+                None,
+                lambda: self.client.table("ui_components").select("*").eq("category", category).execute()
+            )
+        else:
+            result = await loop.run_in_executor(
+                None,
+                lambda: self.client.table("ui_components").select("*").execute()
+            )
+        return result.data or []
+    
+    async def create_ui_component(self, component_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new UI component"""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.client.table("ui_components").insert(component_data).execute()
+        )
+        return result.data[0] if result.data else None
+    
+    # User Profile operations
+    async def create_user_profile(self, profile_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new user profile"""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.client.table("user_profiles").insert(profile_data).execute()
+        )
+        return result.data[0] if result.data else None
+    
+    async def get_user_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get user profile by user ID"""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.client.table("user_profiles").select("*").eq("user_id", user_id).execute()
+        )
+        return result.data[0] if result.data else None
+    
+    # Context Brief operations
+    async def create_context_brief(self, brief_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new context brief"""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.client.table("context_briefs").insert(brief_data).execute()
+        )
+        return result.data[0] if result.data else None
+    
+    # Export operations
+    async def create_export(self, export_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new export"""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.client.table("exports").insert(export_data).execute()
+        )
+        return result.data[0] if result.data else None
+    
+    async def update_wireframe(self, wireframe_id: str, wireframe_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update wireframe data"""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.client.table("wireframes").update(wireframe_data).eq("id", wireframe_id).execute()
+        )
+        return result.data[0] if result.data else None
+    
+    async def create_wireframe_version(self, version_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new wireframe version"""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.client.table("wireframe_versions").insert(version_data).execute()
+        )
+        return result.data[0] if result.data else None
 
 # Global database instance
 db = SupabaseDatabase()

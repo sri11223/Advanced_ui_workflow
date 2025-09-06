@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, Integer, DateTime, Text
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from .base import Base
@@ -11,8 +11,12 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=False)
     avatar_url = Column(Text)
+    
+    # Profile completion tracking
     profile_completed = Column(Boolean, default=False)
     onboarding_step = Column(Integer, default=0)
+    
+    # System fields
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     last_login = Column(DateTime)

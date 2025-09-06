@@ -14,6 +14,11 @@ from app.api import (
     websockets_router,
     health_router
 )
+from app.api.metrics import router as metrics_router
+from app.middleware.security import RateLimitMiddleware, SecurityHeadersMiddleware, RequestValidationMiddleware
+from app.middleware.logging import RequestLoggingMiddleware, ErrorLoggingMiddleware
+from app.middleware.performance import CompressionMiddleware, CacheControlMiddleware
+from app.utils.monitoring import system_monitor
 import asyncio
 import logging
 
@@ -58,9 +63,14 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Redis initialization error: {e}")
         logger.info("⚠️ Using memory cache fallback")
     
+    # Start system monitoring
+    asyncio.create_task(system_monitor.start_monitoring())
+    logger.info("📊 System monitoring started")
+    
     logger.info("🎉 Advanced UI Workflow Backend is ready!")
     logger.info("📚 API Documentation: http://localhost:8000/docs")
     logger.info("🔄 WebSocket endpoint: ws://localhost:8000/ws")
+    logger.info("📈 Metrics endpoint: http://localhost:8000/api/v1/metrics")
     
     yield
     
@@ -71,6 +81,12 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Redis connection closed")
     except Exception as e:
         logger.warning(f"Redis cleanup error: {e}")
+    
+    try:
+        system_monitor.stop_monitoring()
+        logger.info("✅ System monitoring stopped")
+    except Exception as e:
+        logger.warning(f"System monitoring cleanup error: {e}")
     
     try:
         await ai_service.close()
@@ -89,6 +105,15 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Add enterprise-grade middleware stack
+app.add_middleware(ErrorLoggingMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestValidationMiddleware)
+app.add_middleware(RateLimitMiddleware, calls=1000, period=60)  # 1000 requests per minute
+app.add_middleware(CompressionMiddleware, minimum_size=1000)
+app.add_middleware(CacheControlMiddleware)
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -105,6 +130,7 @@ app.include_router(wireframes_router, prefix="/api/v1")
 app.include_router(conversations_router, prefix="/api/v1")
 app.include_router(ui_components_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")
+app.include_router(metrics_router, prefix="/api/v1")
 app.include_router(websockets_router)
 
 @app.get("/")

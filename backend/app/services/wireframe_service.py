@@ -25,7 +25,7 @@ class WireframeService:
             raise ValueError("Failed to create wireframe")
         
         # Create initial version
-        await self._create_version(wireframe["id"], 1, wireframe_data, "Initial version")
+        await self._create_wireframe_version(wireframe["id"], 1, wireframe_data, "Initial version")
         
         return wireframe
     
@@ -60,12 +60,12 @@ class WireframeService:
         
         if result.data:
             # Create version history
-            await self._create_version(wireframe_id, new_version, wireframe_data, changes_summary)
+            await self._create_wireframe_version(wireframe_id, new_version, wireframe_data, changes_summary)
             return result.data[0]
         
         return None
     
-    async def _create_version(self, wireframe_id: str, version_number: int, 
+    async def _create_wireframe_version(self, wireframe_id: str, version_number: int, 
                             wireframe_data: Dict[str, Any], changes_summary: str = None) -> None:
         """Create wireframe version history"""
         version_data = {
@@ -75,11 +75,7 @@ class WireframeService:
             "changes_summary": changes_summary
         }
         
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: db.client.table("wireframe_versions").insert(version_data).execute()
-        )
+        await db.create_wireframe_version(version_data)
     
     async def get_wireframe_versions(self, wireframe_id: str) -> List[Dict[str, Any]]:
         """Get version history for a wireframe"""

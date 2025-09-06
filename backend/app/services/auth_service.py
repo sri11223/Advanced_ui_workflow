@@ -64,13 +64,8 @@ class AuthService:
         # Create access token
         access_token = self.create_access_token({"sub": user["email"], "user_id": user["id"]})
         
-        # Create session
-        session_data = {
-            "user_id": user["id"],
-            "session_token": str(uuid.uuid4()),
-            "expires_at": datetime.utcnow() + timedelta(days=7)
-        }
-        await db.create_session(session_data)
+        # Session management handled by JWT tokens
+        # No need for separate session table in this implementation
         
         return {
             "user": user,
