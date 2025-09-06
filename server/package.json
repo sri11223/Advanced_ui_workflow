@@ -1,0 +1,47 @@
+{
+  "name": "rag-pdf-chatbot-groq",
+  "version": "1.0.0",
+  "description": "RAG-based PDF chatbot using Express.js, Pinecone, and Groq",
+  "main": "server.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "rag",
+    "pdf",
+    "chatbot",
+    "express",
+    "pinecone",
+    "groq",
+    "embeddings"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "@huggingface/inference": "^1.5.1",
+    "@langchain/community": "^0.3.55",
+    "@langchain/core": "^0.3.75",
+    "@langchain/groq": "^0.2.3",
+    "@langchain/pinecone": "^0.2.0",
+    "@pinecone-database/pinecone": "^1.1.2",
+    "@xenova/transformers": "^2.17.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "groq-sdk": "^0.3.1",
+    "langchain": "^0.3.33",
+    "multer": "^1.4.5-lts.1",
+    "openai": "^4.20.1",
+    "pdf-parse": "^1.1.1",
+    "pdf.js-extract": "^0.2.1",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
