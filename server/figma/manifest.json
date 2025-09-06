@@ -1,0 +1,8 @@
+{
+  "name": "Wireframe Importer + AI Assistant",
+  "id": "com.yourteam.wireframe-ai",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"]
+}

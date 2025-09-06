@@ -1,0 +1,53 @@
+{
+  "json": {
+    "title": "Login Screen",
+    "components": [
+      {
+        "type": "text",
+        "label": "Login",
+        "x": 150,
+        "y": 50,
+        "fontSize": 24,
+        "fontWeight": "bold"
+      },
+      {
+        "type": "input",
+        "label": "Username",
+        "x": 50,
+        "y": 120,
+        "width": 300,
+        "height": 40,
+        "placeholder": "Username"
+      },
+      {
+        "type": "input",
+        "label": "Password",
+        "x": 50,
+        "y": 180,
+        "width": 300,
+        "height": 40,
+        "placeholder": "Password",
+        "isPassword": true
+      },
+      { "type": "link", "label": "Forgot Password?", "x": 50, "y": 240 },
+      {
+        "type": "button",
+        "label": "Submit",
+        "x": 50,
+        "y": 280,
+        "width": 300,
+        "backgroundColor": "#337ab7",
+        "textColor": "#ffffff"
+      },
+      {
+        "type": "button",
+        "label": "Register",
+        "x": 50,
+        "y": 340,
+        "width": 300,
+        "backgroundColor": "#337ab7",
+        "textColor": "#ffffff"
+      }
+    ]
+  }
+}
