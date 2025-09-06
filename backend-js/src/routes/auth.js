@@ -43,10 +43,16 @@ const authenticateToken = async (req, res, next) => {
 
 // Register new user
 router.post('/register', async (req, res) => {
+  console.log('=== REGISTRATION ENDPOINT HIT ===');
+  console.log('Request method:', req.method);
+  console.log('Request URL:', req.url);
+  console.log('Request headers:', req.headers);
   try {
+    console.log('Registration request body:', req.body);
     const { email, password, full_name } = req.body;
 
     if (!email || !password || !full_name) {
+      console.log('Missing fields - email:', !!email, 'password:', !!password, 'full_name:', !!full_name);
       return res.status(400).json({ error: 'Email, password, and full name are required' });
     }
 
@@ -71,7 +77,9 @@ router.post('/register', async (req, res) => {
       updated_at: new Date().toISOString()
     };
 
+    console.log('Creating user with data:', userData);
     const user = await db.createUser(userData);
+    console.log('User created successfully:', user);
 
     // Generate JWT token
     const token = jwt.sign(

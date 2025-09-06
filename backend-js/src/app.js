@@ -9,6 +9,7 @@ const { db } = require('./config/database');
 const { websocketService } = require('./services/websocketService');
 const authRoutes = require('./routes/auth');
 const projectRoutes = require('./routes/projects');
+const onboardingRoutes = require('./routes/onboarding');
 
 class App {
   constructor() {
@@ -30,6 +31,7 @@ class App {
     // Mount API routes
     this.app.use('/api/auth', authRoutes.router);
     this.app.use('/api/projects', projectRoutes);
+    this.app.use('/api/onboarding', onboardingRoutes);
 
     // Basic health check
     this.app.get('/health', (req, res) => {

@@ -26,6 +26,7 @@ const {
 // Routes
 const authRoutes = require('../routes/auth');
 const projectRoutes = require('../routes/projects');
+const onboardingRoutes = require('../routes/onboarding');
 
 class EnterpriseApp {
   constructor() {
@@ -78,6 +79,20 @@ class EnterpriseApp {
     this.app.use(secureCORS(['http://localhost:3000', 'http://localhost:5173']));
     this.app.use(responseCompression);
     
+    // Basic Express middleware
+    this.app.use(express.json({ limit: '10mb' }));
+    this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+    
+    // Add basic request logging
+    this.app.use((req, res, next) => {
+      console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+      next();
+    });
+    this.app.use(requestSizeLimiter('10mb'));
+    this.app.use(sanitizeInput);
+    this.app.use(securityValidation);
+    this.app.use(cacheControl);
+
     // Request processing middleware
     this.app.use(requestId);
     this.app.use(requestLogger);
@@ -86,14 +101,6 @@ class EnterpriseApp {
     this.app.use('/api/', createRateLimit(60000, 1000, 'API rate limit exceeded'));
     this.app.use('/api/auth/', createRateLimit(60000, 100, 'Auth rate limit exceeded'));
     
-    // Request parsing and validation
-    this.app.use(express.json({ limit: '10mb' }));
-    this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-    this.app.use(requestSizeLimiter('10mb'));
-    this.app.use(sanitizeInput);
-    this.app.use(securityValidation);
-    this.app.use(cacheControl);
-
     // Metrics collection middleware
     this.app.use((req, res, next) => {
       const start = Date.now();
@@ -114,9 +121,20 @@ class EnterpriseApp {
     this.setupHealthRoutes();
     this.setupMonitoringRoutes();
 
+    // Add global request logging BEFORE routes
+    this.app.use((req, res, next) => {
+      console.log(`[MIDDLEWARE] ${req.method} ${req.url}`);
+      if (req.url.includes('/api/')) {
+        console.log('Request body:', req.body);
+        console.log('Request headers:', req.headers);
+      }
+      next();
+    });
+
     // API routes with resilience patterns
     this.app.use('/api/auth', this.wrapWithResilience(authRoutes.router, 'api'));
     this.app.use('/api/projects', this.wrapWithResilience(projectRoutes, 'api'));
+    this.app.use('/api/onboarding', this.wrapWithResilience(onboardingRoutes, 'api'));
 
     // API documentation
     this.app.get('/api', (req, res) => {
@@ -416,18 +434,23 @@ class EnterpriseApp {
 
   async start() {
     const PORT = process.env.PORT || 8000;
+    const HOST = process.env.HOST || '0.0.0.0';
     
     return new Promise((resolve, reject) => {
-      this.server = this.app.listen(PORT, (err) => {
+      this.server = this.app.listen(PORT, HOST, (err) => {
         if (err) {
+          console.error('Failed to start enterprise server:', err);
           logger.error('Failed to start enterprise server', { error: err.message });
           reject(err);
         } else {
+          console.log(`🚀 Server listening on http://${HOST}:${PORT}`);
+          
           // Initialize services synchronously first
           websocketService.initialize(this.server);
           
           logger.info('🚀 Enterprise Backend Server Started', {
             port: PORT,
+            host: HOST,
             environment: process.env.NODE_ENV || 'development',
             features: [
               'Enterprise Security',
@@ -441,9 +464,21 @@ class EnterpriseApp {
 
           // Initialize cache service and emit event asynchronously
           this.initializeAsyncServices().then(() => {
+            console.log('✅ Enterprise backend fully initialized and ready');
             resolve(this.server);
-          }).catch(reject);
+          }).catch((initError) => {
+            console.error('Failed to initialize async services:', initError);
+            reject(initError);
+          });
         }
+      });
+      
+      this.server.on('error', (error) => {
+        console.error('Server error:', error);
+        if (error.code === 'EADDRINUSE') {
+          console.error(`Port ${PORT} is already in use. Please use a different port.`);
+        }
+        reject(error);
       });
     });
   }

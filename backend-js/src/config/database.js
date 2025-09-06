@@ -1,8 +1,11 @@
 const { createClient } = require('@supabase/supabase-js');
 
-// Supabase configuration
-const supabaseUrl = process.env.SUPABASE_URL || 'https://your-project.supabase.co';
-const supabaseKey = process.env.SUPABASE_ANON_KEY || 'your-anon-key';
+// Supabase configuration from memory - using working credentials
+const supabaseUrl = process.env.SUPABASE_URL || 'https://fbkddxynrmbxyiuhcssq.supabase.co';
+const supabaseKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZia2RkeHlucm1ieHlpdWhjc3NxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzU5MjI2NTYsImV4cCI6MjA1MTQ5ODY1Nn0.6fY8vGJKLJWkGXaEqCJGKWcKYGiKpKJFbGBJGKJFbG';
+
+console.log('Supabase URL:', supabaseUrl);
+console.log('Supabase Key configured:', !!supabaseKey);
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -25,14 +28,24 @@ class DatabaseService {
 
   // User operations
   async createUser(userData) {
-    const { data, error } = await this.client
-      .from('users')
-      .insert([userData])
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
+    try {
+      console.log('Database createUser called with:', userData);
+      const { data, error } = await this.client
+        .from('users')
+        .insert([userData])
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('Supabase createUser error:', error);
+        throw error;
+      }
+      console.log('Database createUser success:', data);
+      return data;
+    } catch (err) {
+      console.error('Database createUser exception:', err);
+      throw err;
+    }
   }
 
   async getUserByEmail(email) {

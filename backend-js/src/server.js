@@ -1,4 +1,3 @@
-const App = require('./app');
 const { logger } = require('./utils/logger');
 const { config } = require('./config');
 
