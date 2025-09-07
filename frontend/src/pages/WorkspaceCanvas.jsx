@@ -2,39 +2,58 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Stage, Layer, Rect, Text, Group } from 'react-konva';
 import Konva from 'konva';
-import { ArrowLeft, Home, Settings, Download, Upload, Undo, Redo, Trash2, Plus, Monitor, Tablet, Smartphone, Palette, Zap, Eye, Layers } from 'lucide-react';
+import { 
+  ArrowLeft, Download, Undo, Redo, Trash2, Plus, Monitor, Tablet, 
+  Smartphone, Zap, Layers, Send, Loader, Sparkles, Lightbulb
+} from 'lucide-react';
 
 const WorkspaceCanvas = () => {
   const { projectName } = useParams();
+  
+  // Chat states
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedObject, setSelectedObject] = useState(null);
-  const [showProperties, setShowProperties] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(100);
+  const [sessionId, setSessionId] = useState(null);
+  const messagesEndRef = useRef(null);
+  
+  // Canvas states
   const [wireframeData, setWireframeData] = useState(null);
   const [currentPageId, setCurrentPageId] = useState(null);
   const [wireframeComponents, setWireframeComponents] = useState([]);
+  const [selectedObject, setSelectedObject] = useState(null);
+  const [showProperties, setShowProperties] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(100);
+  const [viewMode, setViewMode] = useState('desktop');
+  const [deviceTheme, setDeviceTheme] = useState('web');
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [canvasHistory, setCanvasHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  const [sessionId, setSessionId] = useState(null);
-  const [viewMode, setViewMode] = useState('desktop'); // desktop, tablet, mobile
-  const [deviceTheme, setDeviceTheme] = useState('web'); // web, ios, android
-  const [isCollapsed, setIsCollapsed] = useState(false);
   const [performance, setPerformance] = useState({ fps: 60, components: 0 });
+  
   const stageRef = useRef(null);
   const layerRef = useRef(null);
 
+  // Sample prompts for chat
+  const samplePrompts = [
+    "Create a login page with email and password",
+    "Design an e-commerce homepage", 
+    "Build a dashboard with charts",
+    "Make a contact form layout"
+  ];
+
+  // Auto-scroll chat messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   // Performance monitoring
   useEffect(() => {
-    const updatePerformance = () => {
-      setPerformance(prev => ({
-        ...prev,
-        components: wireframeComponents.length,
-        fps: Math.round(60 - (wireframeComponents.length * 0.1))
-      }));
-    };
-    updatePerformance();
+    setPerformance(prev => ({
+      ...prev,
+      components: wireframeComponents.length,
+      fps: Math.round(60 - (wireframeComponents.length * 0.1))
+    }));
   }, [wireframeComponents]);
 
   // Responsive canvas sizing
@@ -62,160 +81,137 @@ const WorkspaceCanvas = () => {
     return styles[deviceTheme] || styles.web;
   };
 
-  // Keyboard shortcuts with performance optimization
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Delete' && selectedObject) {
-        deleteSelectedObject();
-      }
-      
-      if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        undo();
-      }
-      
-      if ((e.ctrlKey && e.key === 'y') || (e.ctrlKey && e.shiftKey && e.key === 'z')) {
-        e.preventDefault();
-        redo();
-      }
-      
-      if (e.key === 'Escape') {
-        setSelectedObject(null);
-        setShowProperties(false);
-      }
+  // Chat message handler
+  const handleSendMessage = async () => {
+    if (!inputValue.trim() || isLoading) return;
 
-      // Advanced shortcuts
-      if (e.key === '1') setViewMode('desktop');
-      if (e.key === '2') setViewMode('tablet');
-      if (e.key === '3') setViewMode('mobile');
-      if (e.ctrlKey && e.key === 'h') {
-        e.preventDefault();
-        setIsCollapsed(!isCollapsed);
-      }
+    const userMessage = {
+      type: 'user',
+      content: inputValue.trim(),
+      timestamp: new Date().toISOString()
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectedObject, isCollapsed]);
-
-  const handleSendMessage = async () => {
-    if (!inputValue.trim()) return;
-
-    const userMessage = { type: 'user', content: inputValue };
     setMessages(prev => [...prev, userMessage]);
+    setInputValue('');
     setIsLoading(true);
 
     try {
-      const requestBody = {
-        prompt: inputValue,
-        sessionId: sessionId,
-        existingWireframe: wireframeData
-      };
-
       const response = await fetch('http://localhost:5000/api/wireframe/generate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: userMessage.content,
+          sessionId: sessionId,
+          existingWireframe: wireframeData ? {
+            components: wireframeComponents,
+            pages: wireframeData.pages,
+            websiteType: wireframeData.websiteType || wireframeData.appType,
+            currentPageId: currentPageId
+          } : null
+        }),
       });
 
       const data = await response.json();
 
       if (data.success) {
-        // Update session ID for future modifications
-        if (data.sessionId) {
-          setSessionId(data.sessionId);
-        }
-
-        const botMessage = { 
-          type: 'bot', 
-          content: data.isModification 
-            ? `Modified wireframe: ${data.message}` 
-            : `Generated wireframe: ${data.message}`,
-          wireframe: data.wireframe,
-          isModification: data.isModification
+        const aiMessage = {
+          type: 'assistant',
+          content: data.message || 'Wireframe generated successfully!',
+          timestamp: new Date().toISOString(),
+          version: data.isModification ? 'Modified' : 'Generated',
+          hasQuestions: data.hasQuestions,
+          questions: data.questions,
+          suggestions: data.suggestions,
+          sessionState: data.sessionState
         };
-        setMessages(prev => [...prev, botMessage]);
         
-        // Generate or update wireframe on canvas
+        setMessages(prev => [...prev, aiMessage]);
+        setSessionId(data.sessionId);
+        
+        // Load wireframe into canvas
         if (data.wireframe) {
-          generateWireframeOnCanvas(data.wireframe);
+          handleWireframeGenerated(data.wireframe);
         }
       } else {
-        const errorMessage = { type: 'error', content: `Error: ${data.error}` };
+        const errorMessage = {
+          type: 'error',
+          content: data.error || 'Failed to generate wireframe',
+          timestamp: new Date().toISOString()
+        };
         setMessages(prev => [...prev, errorMessage]);
       }
     } catch (error) {
-      const errorMessage = { type: 'error', content: `Error: ${error.message}` };
+      console.error('Error sending message:', error);
+      const errorMessage = {
+        type: 'error',
+        content: 'Network error. Please try again.',
+        timestamp: new Date().toISOString()
+      };
       setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
     }
-
-    setInputValue('');
-    setIsLoading(false);
   };
 
-  const generateWireframeOnCanvas = (data) => {
-    if (data && data.pages) {
-      // Multi-page wireframe
-      setWireframeData(data);
-      setCurrentPageId(data.pages[0]?.id);
-      setWireframeComponents(data.pages[0]?.components || []);
-    } else if (data && data.components) {
-      // Single page wireframe (legacy)
-      setWireframeComponents(data.components);
+  // Handle wireframe generation
+  const handleWireframeGenerated = (wireframeData) => {
+    console.log("🎨 Loading wireframe data:", wireframeData);
+    
+    if (wireframeData && wireframeData.json) {
+      setWireframeData(wireframeData.json);
+      
+      if (wireframeData.json.pages && wireframeData.json.pages.length > 0) {
+        const firstPage = wireframeData.json.pages[0];
+        setCurrentPageId(firstPage.id);
+        setWireframeComponents(firstPage.components || []);
+      } else if (wireframeData.json.components) {
+        setWireframeComponents(wireframeData.json.components);
+      }
+      
+      setSelectedObject(null);
+      setShowProperties(false);
+      saveCanvasState();
+      
+      console.log("✅ Wireframe loaded successfully");
     }
-    saveCanvasState();
   };
 
+  // Canvas operations
   const switchToPage = (pageId) => {
     if (!wireframeData || !wireframeData.pages) return;
     
     const page = wireframeData.pages.find(p => p.id === pageId);
     if (page) {
       setCurrentPageId(pageId);
-      setWireframeComponents(page.components);
+      setWireframeComponents(page.components || []);
       setSelectedObject(null);
       setShowProperties(false);
     }
   };
 
-  const getCurrentPage = () => {
-    if (!wireframeData || !wireframeData.pages || !currentPageId) return null;
-    return wireframeData.pages.find(p => p.id === currentPageId);
-  };
-
   const addComponent = (type) => {
-    const centerX = 400;
-    const centerY = 300;
+    const centerX = getCanvasSize().width / 2;
+    const centerY = getCanvasSize().height / 2;
     
     const newComponent = {
       id: Date.now(),
       type,
-      x: centerX - 50,
-      y: centerY - 15,
-      width: type === 'text' ? 100 : (type === 'navigation' ? 300 : 150),
-      height: type === 'text' ? 20 : (type === 'navigation' ? 40 : 30),
+      x: centerX - 75,
+      y: centerY - 20,
+      width: type === 'text' ? 150 : (type === 'button' ? 200 : 250),
+      height: type === 'text' ? 40 : (type === 'button' ? 50 : 40),
       text: type === 'button' ? 'Button' : 
-            type === 'input' ? 'Enter text...' : 
-            type === 'text' ? 'Sample Text' :
-            type === 'navigation' ? 'Navigation' : 
-            type.charAt(0).toUpperCase() + type.slice(1),
-      // Enhanced styling properties
-      fill: type === 'button' ? '#3b82f6' : 
-            type === 'navigation' ? '#1f2937' : '#ffffff',
-      textColor: type === 'navigation' ? '#ffffff' : '#000000',
-      fontSize: type === 'text' ? 16 : 14,
+            type === 'input' ? 'Input field...' : 
+            type === 'text' ? 'Sample Text' : 'Component',
+      fill: type === 'button' ? '#3b82f6' : '#ffffff',
+      textColor: type === 'button' ? '#ffffff' : '#374151',
+      fontSize: 14,
       fontFamily: 'Arial',
       fontWeight: 'normal',
-      borderColor: '#6b7280',
+      borderColor: '#d1d5db',
       borderWidth: 1,
       borderRadius: type === 'button' ? 6 : 4,
-      opacity: 1,
-      shadow: false,
-      shadowColor: '#000000',
-      shadowBlur: 4,
-      shadowOffset: { x: 2, y: 2 }
+      opacity: 1
     };
     
     setWireframeComponents(prev => [...prev, newComponent]);
@@ -233,7 +229,6 @@ const WorkspaceCanvas = () => {
       )
     );
     
-    // Update selected object to reflect changes immediately
     setSelectedObject(prev => ({ ...prev, [property]: value }));
     saveCanvasState();
   };
@@ -294,25 +289,54 @@ const WorkspaceCanvas = () => {
   };
 
   const exportAsJSON = () => {
-    const dataStr = JSON.stringify(wireframeComponents, null, 2);
-    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const dataStr = JSON.stringify({
+      components: wireframeComponents,
+      wireframeData,
+      viewMode,
+      timestamp: new Date().toISOString()
+    }, null, 2);
     
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
     const link = document.createElement('a');
     link.download = `wireframe-${projectName || 'untitled'}.json`;
     link.href = URL.createObjectURL(dataBlob);
     link.click();
+    URL.revokeObjectURL(link.href);
   };
 
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Delete' && selectedObject) {
+        deleteSelectedObject();
+      }
+      if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      if ((e.ctrlKey && e.key === 'y') || (e.ctrlKey && e.shiftKey && e.key === 'z')) {
+        e.preventDefault();
+        redo();
+      }
+      if (e.key === 'Escape') {
+        setSelectedObject(null);
+        setShowProperties(false);
+      }
+      if (e.key === '1') setViewMode('desktop');
+      if (e.key === '2') setViewMode('tablet');
+      if (e.key === '3') setViewMode('mobile');
+      if (e.ctrlKey && e.key === 'h') {
+        e.preventDefault();
+        setIsCollapsed(!isCollapsed);
+      }
+    };
 
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [selectedObject, isCollapsed, historyIndex, canvasHistory]);
+
+  // Konva component renderer
   const KonvaComponent = ({ component, isSelected, onSelect }) => {
-    const { type, x, y, width, height, text, fill } = component;
-    
     const handleClick = () => {
       onSelect(component);
       setShowProperties(true);
@@ -330,7 +354,6 @@ const WorkspaceCanvas = () => {
         )
       );
       
-      // Update selected object if this is the selected component
       if (selectedObject && selectedObject.id === component.id) {
         setSelectedObject(prev => ({ ...prev, x: newX, y: newY }));
       }
@@ -338,26 +361,23 @@ const WorkspaceCanvas = () => {
       saveCanvasState();
     };
 
-    if (type === 'text') {
+    if (component.type === 'text') {
       return (
         <Text
           key={component.id}
-          x={x}
-          y={y}
-          text={text}
+          x={component.x}
+          y={component.y}
+          text={component.text || 'Text'}
           fontSize={component.fontSize || 16}
           fontFamily={component.fontFamily || 'Arial'}
           fontStyle={component.fontWeight || 'normal'}
-          fill={component.textColor || '#333'}
+          fill={component.textColor || '#374151'}
           opacity={component.opacity || 1}
           draggable
           onClick={handleClick}
           onDragEnd={handleDragEnd}
-          stroke={isSelected ? '#007bff' : 'transparent'}
+          stroke={isSelected ? '#3b82f6' : 'transparent'}
           strokeWidth={2}
-          shadowColor={component.shadow ? component.shadowColor : undefined}
-          shadowBlur={component.shadow ? component.shadowBlur : 0}
-          shadowOffset={component.shadow ? component.shadowOffset : { x: 0, y: 0 }}
         />
       );
     }
@@ -365,32 +385,29 @@ const WorkspaceCanvas = () => {
     return (
       <Group
         key={component.id}
-        x={x}
-        y={y}
+        x={component.x}
+        y={component.y}
         draggable
         onClick={handleClick}
         onDragEnd={handleDragEnd}
       >
         <Rect
-          width={width}
-          height={height}
-          fill={fill || '#f8f9fa'}
-          stroke={isSelected ? '#007bff' : (component.borderColor || '#333')}
+          width={component.width || 200}
+          height={component.height || 40}
+          fill={component.fill || '#ffffff'}
+          stroke={isSelected ? '#3b82f6' : (component.borderColor || '#d1d5db')}
           strokeWidth={isSelected ? 2 : (component.borderWidth || 1)}
-          cornerRadius={component.borderRadius || (type === 'button' ? 4 : 2)}
+          cornerRadius={component.borderRadius || 4}
           opacity={component.opacity || 1}
-          shadowColor={component.shadow ? component.shadowColor : undefined}
-          shadowBlur={component.shadow ? component.shadowBlur : 0}
-          shadowOffset={component.shadow ? component.shadowOffset : { x: 0, y: 0 }}
         />
         <Text
-          x={10}
-          y={height / 2 - 8}
-          text={text}
+          x={8}
+          y={(component.height || 40) / 2 - 7}
+          text={component.text || 'Component'}
           fontSize={component.fontSize || 14}
           fontFamily={component.fontFamily || 'Arial'}
           fontStyle={component.fontWeight || 'normal'}
-          fill={component.textColor || (type === 'navigation' ? 'white' : '#333')}
+          fill={component.textColor || '#374151'}
         />
       </Group>
     );
@@ -446,7 +463,6 @@ const WorkspaceCanvas = () => {
               </button>
             </div>
 
-            {/* Device Theme Switcher */}
             <select
               value={deviceTheme}
               onChange={(e) => setDeviceTheme(e.target.value)}
@@ -505,55 +521,184 @@ const WorkspaceCanvas = () => {
 
       {/* Main Content */}
       <div className="flex-1 flex">
-        {/* Chat Panel */}
-        <div className={`${isCollapsed ? 'w-0 overflow-hidden' : 'w-1/3'} bg-gray-800 border-r border-gray-700 flex flex-col transition-all duration-300`}>
-          <div className="p-4 border-b border-gray-700">
-            <h2 className="text-lg font-semibold text-white">AI Wireframe Chat</h2>
-            <p className="text-sm text-gray-400">Describe your wireframe and I'll generate it</p>
-          </div>
-        
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.map((message, index) => (
-              <div
-                key={index}
-                className={`p-3 rounded-lg ${
-                  message.type === 'user'
-                    ? 'bg-blue-600 text-white ml-8'
-                    : message.type === 'error'
-                    ? 'bg-red-600 text-white mr-8'
-                    : 'bg-gray-700 text-gray-100 mr-8'
-                }`}
-              >
-                {message.content}
+        {/* Integrated Chat Panel */}
+        <div className={`${isCollapsed ? 'w-0 overflow-hidden' : 'w-80 min-w-80'} bg-gray-800 border-r border-gray-700 flex flex-col transition-all duration-300`}>
+          {/* Chat Header */}
+          <div className="p-4 border-b border-gray-700 bg-gradient-to-r from-blue-600 to-purple-600">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 bg-white bg-opacity-20 rounded-lg flex items-center justify-center backdrop-blur-sm">
+                <Sparkles className="w-4 h-4 text-white" />
               </div>
-            ))}
-            {isLoading && (
-              <div className="bg-gray-700 text-gray-100 mr-8 p-3 rounded-lg">
-                <div className="flex items-center space-x-2">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-400"></div>
-                  <span>Generating wireframe...</span>
+              <div>
+                <h3 className="text-lg font-bold text-white">AI Wireframe Assistant</h3>
+                <p className="text-blue-100 text-xs">Describe your vision, I'll create it</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Messages Area */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
+            {messages.length === 0 && (
+              <div className="text-center py-8">
+                <div className="text-4xl mb-4">🎨</div>
+                <h4 className="text-lg font-semibold text-white mb-2">Let's Create Something Amazing</h4>
+                <p className="text-gray-300 text-sm mb-6">Start by describing your wireframe</p>
+                
+                <div className="grid grid-cols-1 gap-2">
+                  {samplePrompts.map((prompt, index) => (
+                    <button
+                      key={index}
+                      onClick={() => setInputValue(prompt)}
+                      className="p-2 bg-gray-700 bg-opacity-50 hover:bg-opacity-70 border border-gray-600 rounded-lg text-left text-gray-300 hover:text-white transition-all text-xs flex items-center space-x-2"
+                    >
+                      <Lightbulb className="w-3 h-3 flex-shrink-0" />
+                      <span>{prompt}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
+
+            {messages.map((msg, i) => (
+              <div
+                key={i}
+                className={`message flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div className={`message-bubble max-w-[85%] px-3 py-2 rounded-lg text-sm ${
+                  msg.type === 'user' 
+                    ? 'bg-blue-600 text-white rounded-br-sm' 
+                    : msg.type === 'error'
+                    ? 'bg-red-600 text-white rounded-bl-sm'
+                    : 'bg-gray-700 text-gray-100 rounded-bl-sm'
+                }`}>
+                  <div className="leading-relaxed">{msg.content}</div>
+                  
+                  {/* Follow-up Questions */}
+                  {msg.hasQuestions && msg.questions && msg.questions.length > 0 && (
+                    <div className="mt-3 p-2 bg-black bg-opacity-20 rounded-lg">
+                      <div className="text-xs font-semibold mb-2 text-blue-200">Follow-up Questions:</div>
+                      <div className="space-y-1">
+                        {msg.questions.map((question, qIndex) => (
+                          <div key={qIndex} className="text-xs text-gray-200">
+                            {qIndex + 1}. {question}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Suggestions */}
+                  {msg.suggestions && msg.suggestions.length > 0 && (
+                    <div className="mt-3 p-2 bg-black bg-opacity-20 rounded-lg">
+                      <div className="text-xs font-semibold mb-2 text-green-200">Suggestions:</div>
+                      <div className="flex flex-wrap gap-1">
+                        {msg.suggestions.map((suggestion, sIndex) => (
+                          <button
+                            key={sIndex}
+                            onClick={() => setInputValue(suggestion)}
+                            className="px-2 py-1 text-xs bg-green-600 bg-opacity-30 hover:bg-opacity-50 text-green-200 rounded transition-colors"
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {msg.version && (
+                    <div className="text-xs mt-2 opacity-75 bg-black bg-opacity-20 px-2 py-1 rounded-full inline-block">
+                      {msg.version}
+                    </div>
+                  )}
+                  <div className="text-xs mt-1 opacity-60">
+                    {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {isLoading && (
+              <div className="flex items-center space-x-2 text-gray-400 bg-gray-700 rounded-lg p-3 mr-8">
+                <div className="flex space-x-1">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                </div>
+                <span className="text-sm">Generating wireframe...</span>
+              </div>
+            )}
+            
+            <div ref={messagesEndRef} />
           </div>
-        
-          <div className="p-4 border-t border-gray-700">
+
+          {/* Input Area */}
+          <div className="p-4 border-t border-gray-700 bg-gray-800">
+            {messages.length === 0 && (
+              <div className="mb-3">
+                <div className="text-xs text-gray-500 mb-2">Quick start:</div>
+                <div className="flex flex-wrap gap-1">
+                  {["Login page", "Dashboard", "E-commerce", "Blog"].map((quick, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setInputValue(`Create a ${quick.toLowerCase()} wireframe`)}
+                      className="px-2 py-1 text-xs bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition-colors"
+                    >
+                      {quick}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex space-x-2">
-              <input
-                type="text"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder="Describe your wireframe..."
-                className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
+              <div className="flex-1 relative">
+                <input
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                  placeholder={messages.length === 0 ? "Describe your wireframe..." : "Modify or add to wireframe..."}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                  disabled={isLoading}
+                />
+                {inputValue && (
+                  <button
+                    onClick={() => setInputValue('')}
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white text-xs"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              
               <button
                 onClick={handleSendMessage}
-                disabled={isLoading}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                disabled={isLoading || !inputValue.trim()}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-1"
               >
-                Send
+                {isLoading ? (
+                  <Loader className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
               </button>
+            </div>
+
+            <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+              <div className="flex items-center space-x-2">
+                {sessionId && (
+                  <span className="flex items-center space-x-1">
+                    <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
+                    <span>Session active</span>
+                  </span>
+                )}
+              </div>
+              <span>Press Enter to send</span>
             </div>
           </div>
         </div>
@@ -566,9 +711,13 @@ const WorkspaceCanvas = () => {
               <div className="flex items-center space-x-4">
                 {wireframeData && (
                   <div className="flex items-center space-x-2 text-sm text-gray-400">
-                    <span>App Type: {wireframeData.appType}</span>
-                    <span>•</span>
-                    <span>{wireframeData.totalPages} Pages</span>
+                    <span>Type: {wireframeData.websiteType || 'Wireframe'}</span>
+                    {wireframeData.pages && (
+                      <>
+                        <span>•</span>
+                        <span>{wireframeData.pages.length} page(s)</span>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -589,52 +738,24 @@ const WorkspaceCanvas = () => {
                 >
                   Reset
                 </button>
-                <button
-                  onClick={() => {
-                    const stage = stageRef.current;
-                    if (stage) {
-                      const newScale = Math.max(0.1, stage.scaleX() / 1.2);
-                      stage.scale({ x: newScale, y: newScale });
-                      setZoomLevel(Math.round(newScale * 100));
-                      stage.batchDraw();
-                    }
-                  }}
-                  className="px-2 py-1 bg-gray-700 text-gray-300 rounded text-xs hover:bg-gray-600 transition-colors"
-                >
-                  -
-                </button>
-                <button
-                  onClick={() => {
-                    const stage = stageRef.current;
-                    if (stage) {
-                      const newScale = Math.min(5, stage.scaleX() * 1.2);
-                      stage.scale({ x: newScale, y: newScale });
-                      setZoomLevel(Math.round(newScale * 100));
-                      stage.batchDraw();
-                    }
-                  }}
-                  className="px-2 py-1 bg-gray-700 text-gray-300 rounded text-xs hover:bg-gray-600 transition-colors"
-                >
-                  +
-                </button>
               </div>
             </div>
 
-            {/* Page Tabs */}
+            {/* Page Navigation Tabs */}
             {wireframeData && wireframeData.pages && wireframeData.pages.length > 1 && (
-              <div className="flex items-center space-x-1 mb-4">
-                <span className="text-sm font-medium text-gray-300 mr-3">Pages:</span>
+              <div className="flex items-center space-x-2 mb-4">
+                <span className="text-sm text-gray-300 mr-2">Pages:</span>
                 {wireframeData.pages.map(page => (
                   <button
                     key={page.id}
                     onClick={() => switchToPage(page.id)}
-                    className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                    className={`px-3 py-1 text-sm rounded-lg transition-colors ${
                       currentPageId === page.id
                         ? 'bg-blue-600 text-white'
                         : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                     }`}
                   >
-                    {page.title}
+                    {page.name}
                   </button>
                 ))}
               </div>
@@ -642,7 +763,14 @@ const WorkspaceCanvas = () => {
 
             {/* Component Toolbar */}
             <div className="flex items-center space-x-2">
-              <span className="text-sm font-medium text-gray-300 mr-2">Add:</span>
+              <span className="text-sm text-gray-300 mr-2">Add:</span>
+              <button
+                onClick={() => addComponent('text')}
+                className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Text</span>
+              </button>
               <button
                 onClick={() => addComponent('button')}
                 className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
@@ -657,43 +785,14 @@ const WorkspaceCanvas = () => {
                 <Plus className="w-3 h-3" />
                 <span>Input</span>
               </button>
-              <button
-                onClick={() => addComponent('text')}
-                className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Text</span>
-              </button>
-              <button
-                onClick={() => addComponent('navigation')}
-                className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Nav</span>
-              </button>
-              <button
-                onClick={() => addComponent('container')}
-                className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Container</span>
-              </button>
-              <button
-                onClick={() => addComponent('image')}
-                className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Image</span>
-              </button>
             </div>
           </div>
 
           {/* Canvas */}
           <div className="flex-1 bg-gray-900 overflow-hidden relative">
-            {/* Device Frame */}
             <div className="flex items-center justify-center h-full p-8">
               <div 
-                className={`bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 relative overflow-hidden`}
+                className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 relative overflow-hidden"
                 style={{
                   width: getCanvasSize().width,
                   height: getCanvasSize().height,
@@ -704,14 +803,16 @@ const WorkspaceCanvas = () => {
               >
                 {/* Grid Background */}
                 <div className="absolute inset-0 opacity-5">
-                  <div className="grid grid-cols-20 grid-rows-20 h-full w-full">
-                    {Array.from({ length: 400 }).map((_, i) => (
-                      <div key={i} className="border border-gray-600"></div>
-                    ))}
-                  </div>
+                  <svg width="100%" height="100%">
+                    <defs>
+                      <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                        <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#6b7280" strokeWidth="0.5"/>
+                      </pattern>
+                    </defs>
+                    <rect width="100%" height="100%" fill="url(#grid)" />
+                  </svg>
                 </div>
                 
-                {/* Performance Optimized Canvas */}
                 <Stage
                   ref={stageRef}
                   width={getCanvasSize().width}
@@ -733,8 +834,6 @@ const WorkspaceCanvas = () => {
                     };
                     
                     let newScale = e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy;
-                    
-                    // Limit zoom range
                     newScale = Math.max(0.1, Math.min(5, newScale));
                     setZoomLevel(Math.round(newScale * 100));
                     
@@ -747,18 +846,45 @@ const WorkspaceCanvas = () => {
                     stage.position(newPos);
                     stage.batchDraw();
                   }}
+                  onMouseDown={(e) => {
+                    if (e.target === e.target.getStage()) {
+                      setSelectedObject(null);
+                      setShowProperties(false);
+                    }
+                  }}
                 >
                   <Layer ref={layerRef}>
                     {wireframeComponents.length === 0 ? (
-                      <Text
-                        x={getCanvasSize().width / 2}
-                        y={getCanvasSize().height / 2}
-                        text={`${viewMode.charAt(0).toUpperCase() + viewMode.slice(1)} wireframe will appear here`}
-                        fontSize={18}
-                        fill="#9ca3af"
-                        offsetX={120}
-                        offsetY={9}
-                      />
+                      <>
+                        <Text
+                          x={getCanvasSize().width / 2}
+                          y={getCanvasSize().height / 2 - 40}
+                          text={`${viewMode.charAt(0).toUpperCase() + viewMode.slice(1)} Canvas`}
+                          fontSize={24}
+                          fill="#6b7280"
+                          fontStyle="bold"
+                          offsetX={80}
+                          offsetY={12}
+                        />
+                        <Text
+                          x={getCanvasSize().width / 2}
+                          y={getCanvasSize().height / 2}
+                          text="Start by describing your wireframe in the chat"
+                          fontSize={16}
+                          fill="#9ca3af"
+                          offsetX={150}
+                          offsetY={8}
+                        />
+                        <Text
+                          x={getCanvasSize().width / 2}
+                          y={getCanvasSize().height / 2 + 30}
+                          text="Or use the component toolbar above to add elements manually"
+                          fontSize={14}
+                          fill="#9ca3af"
+                          offsetX={200}
+                          offsetY={7}
+                        />
+                      </>
                     ) : (
                       wireframeComponents.map(component => (
                         <KonvaComponent
@@ -827,24 +953,6 @@ const WorkspaceCanvas = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Font Family</label>
-                  <select
-                    value={selectedObject.fontFamily || 'Arial'}
-                    onChange={(e) => updateObjectProperty('fontFamily', e.target.value)}
-                    className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  >
-                    <option value="Arial">Arial</option>
-                    <option value="Helvetica">Helvetica</option>
-                    <option value="Times New Roman">Times New Roman</option>
-                    <option value="Georgia">Georgia</option>
-                    <option value="Verdana">Verdana</option>
-                    <option value="Courier New">Courier New</option>
-                    <option value="Inter">Inter</option>
-                    <option value="Roboto">Roboto</option>
-                  </select>
-                </div>
-
-                <div>
                   <label className="block text-xs text-gray-400 mb-1">Text Color</label>
                   <div className="flex items-center space-x-2">
                     <input
@@ -863,9 +971,60 @@ const WorkspaceCanvas = () => {
                 </div>
               </div>
 
-              {/* Background & Fill */}
+              {/* Position & Size */}
               <div className="space-y-3">
-                <h4 className="text-sm font-medium text-gray-200 border-b border-gray-600 pb-1">Background</h4>
+                <h4 className="text-sm font-medium text-gray-200 border-b border-gray-600 pb-1">Position & Size</h4>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">X Position</label>
+                    <input
+                      type="number"
+                      value={Math.round(selectedObject.x || 0)}
+                      onChange={(e) => updateObjectProperty('x', parseInt(e.target.value) || 0)}
+                      className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Y Position</label>
+                    <input
+                      type="number"
+                      value={Math.round(selectedObject.y || 0)}
+                      onChange={(e) => updateObjectProperty('y', parseInt(e.target.value) || 0)}
+                      className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Width</label>
+                    <input
+                      type="number"
+                      min="10"
+                      value={Math.round(selectedObject.width || 100)}
+                      onChange={(e) => updateObjectProperty('width', parseInt(e.target.value) || 100)}
+                      className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Height</label>
+                    <input
+                      type="number"
+                      min="10"
+                      value={Math.round(selectedObject.height || 40)}
+                      onChange={(e) => updateObjectProperty('height', parseInt(e.target.value) || 40)}
+                      className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Background & Appearance */}
+              <div className="space-y-3">
+                <h4 className="text-sm font-medium text-gray-200 border-b border-gray-600 pb-1">Background & Appearance</h4>
                 
                 <div>
                   <label className="block text-xs text-gray-400 mb-1">Background Color</label>
@@ -880,6 +1039,50 @@ const WorkspaceCanvas = () => {
                       type="text"
                       value={selectedObject.fill || '#ffffff'}
                       onChange={(e) => updateObjectProperty('fill', e.target.value)}
+                      className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Border Width</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="10"
+                      value={selectedObject.borderWidth || 1}
+                      onChange={(e) => updateObjectProperty('borderWidth', parseInt(e.target.value) || 0)}
+                      className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Border Radius</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="50"
+                      value={selectedObject.borderRadius || 4}
+                      onChange={(e) => updateObjectProperty('borderRadius', parseInt(e.target.value) || 0)}
+                      className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Border Color</label>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="color"
+                      value={selectedObject.borderColor || '#d1d5db'}
+                      onChange={(e) => updateObjectProperty('borderColor', e.target.value)}
+                      className="w-12 h-8 bg-gray-700 border border-gray-600 rounded cursor-pointer"
+                    />
+                    <input
+                      type="text"
+                      value={selectedObject.borderColor || '#d1d5db'}
+                      onChange={(e) => updateObjectProperty('borderColor', e.target.value)}
                       className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
@@ -902,59 +1105,70 @@ const WorkspaceCanvas = () => {
                 </div>
               </div>
 
-              {/* Border */}
+              {/* Advanced Styling */}
               <div className="space-y-3">
-                <h4 className="text-sm font-medium text-gray-200 border-b border-gray-600 pb-1">Border</h4>
+                <h4 className="text-sm font-medium text-gray-200 border-b border-gray-600 pb-1">Advanced Styling</h4>
                 
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Component Type</label>
+                  <select
+                    value={selectedObject.type || 'text'}
+                    onChange={(e) => updateObjectProperty('type', e.target.value)}
+                    className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="text">Text</option>
+                    <option value="button">Button</option>
+                    <option value="input">Input Field</option>
+                    <option value="container">Container</option>
+                    <option value="image">Image</option>
+                    <option value="navigation">Navigation</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Font Family</label>
+                  <select
+                    value={selectedObject.fontFamily || 'Arial'}
+                    onChange={(e) => updateObjectProperty('fontFamily', e.target.value)}
+                    className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="Arial">Arial</option>
+                    <option value="Helvetica">Helvetica</option>
+                    <option value="Times New Roman">Times New Roman</option>
+                    <option value="Georgia">Georgia</option>
+                    <option value="Verdana">Verdana</option>
+                    <option value="Courier New">Courier New</option>
+                    <option value="Inter">Inter</option>
+                    <option value="Roboto">Roboto</option>
+                  </select>
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1">Border Width</label>
+                    <label className="block text-xs text-gray-400 mb-1">Rotation (°)</label>
                     <input
                       type="number"
-                      min="0"
-                      max="10"
-                      value={selectedObject.borderWidth || 1}
-                      onChange={(e) => updateObjectProperty('borderWidth', parseInt(e.target.value))}
+                      min="-180"
+                      max="180"
+                      value={selectedObject.rotation || 0}
+                      onChange={(e) => updateObjectProperty('rotation', parseInt(e.target.value) || 0)}
                       className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
                   
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1">Border Radius</label>
+                    <label className="block text-xs text-gray-400 mb-1">Z-Index</label>
                     <input
                       type="number"
                       min="0"
-                      max="50"
-                      value={selectedObject.borderRadius || 4}
-                      onChange={(e) => updateObjectProperty('borderRadius', parseInt(e.target.value))}
+                      max="100"
+                      value={selectedObject.zIndex || 1}
+                      onChange={(e) => updateObjectProperty('zIndex', parseInt(e.target.value) || 1)}
                       className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Border Color</label>
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="color"
-                      value={selectedObject.borderColor || '#6b7280'}
-                      onChange={(e) => updateObjectProperty('borderColor', e.target.value)}
-                      className="w-12 h-8 bg-gray-700 border border-gray-600 rounded cursor-pointer"
-                    />
-                    <input
-                      type="text"
-                      value={selectedObject.borderColor || '#6b7280'}
-                      onChange={(e) => updateObjectProperty('borderColor', e.target.value)}
-                      className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Effects */}
-              <div className="space-y-3">
-                <h4 className="text-sm font-medium text-gray-200 border-b border-gray-600 pb-1">Effects</h4>
-                
                 <div className="flex items-center justify-between">
                   <label className="text-xs text-gray-400">Drop Shadow</label>
                   <input
@@ -985,7 +1199,7 @@ const WorkspaceCanvas = () => {
                           min="0"
                           max="20"
                           value={selectedObject.shadowBlur || 4}
-                          onChange={(e) => updateObjectProperty('shadowBlur', parseInt(e.target.value))}
+                          onChange={(e) => updateObjectProperty('shadowBlur', parseInt(e.target.value) || 0)}
                           className="w-full px-1 py-1 bg-gray-700 border border-gray-600 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                         />
                       </div>
@@ -997,7 +1211,10 @@ const WorkspaceCanvas = () => {
                           min="-20"
                           max="20"
                           value={selectedObject.shadowOffset?.x || 2}
-                          onChange={(e) => updateObjectProperty('shadowOffset', { ...selectedObject.shadowOffset, x: parseInt(e.target.value) })}
+                          onChange={(e) => updateObjectProperty('shadowOffset', { 
+                            ...(selectedObject.shadowOffset || {}), 
+                            x: parseInt(e.target.value) || 0 
+                          })}
                           className="w-full px-1 py-1 bg-gray-700 border border-gray-600 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                         />
                       </div>
@@ -1009,13 +1226,70 @@ const WorkspaceCanvas = () => {
                           min="-20"
                           max="20"
                           value={selectedObject.shadowOffset?.y || 2}
-                          onChange={(e) => updateObjectProperty('shadowOffset', { ...selectedObject.shadowOffset, y: parseInt(e.target.value) })}
+                          onChange={(e) => updateObjectProperty('shadowOffset', { 
+                            ...(selectedObject.shadowOffset || {}), 
+                            y: parseInt(e.target.value) || 0 
+                          })}
                           className="w-full px-1 py-1 bg-gray-700 border border-gray-600 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                         />
                       </div>
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Quick Actions */}
+              <div className="space-y-3">
+                <h4 className="text-sm font-medium text-gray-200 border-b border-gray-600 pb-1">Quick Actions</h4>
+                
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      updateObjectProperty('x', 50);
+                      updateObjectProperty('y', 50);
+                    }}
+                    className="px-2 py-1 bg-blue-600 bg-opacity-30 hover:bg-opacity-50 text-blue-200 rounded text-xs transition-colors"
+                  >
+                    Reset Position
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      updateObjectProperty('width', 200);
+                      updateObjectProperty('height', 40);
+                    }}
+                    className="px-2 py-1 bg-green-600 bg-opacity-30 hover:bg-opacity-50 text-green-200 rounded text-xs transition-colors"
+                  >
+                    Reset Size
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      const newComponent = { 
+                        ...selectedObject, 
+                        id: Date.now(), 
+                        x: selectedObject.x + 20, 
+                        y: selectedObject.y + 20 
+                      };
+                      setWireframeComponents(prev => [...prev, newComponent]);
+                      saveCanvasState();
+                    }}
+                    className="px-2 py-1 bg-purple-600 bg-opacity-30 hover:bg-opacity-50 text-purple-200 rounded text-xs transition-colors"
+                  >
+                    Duplicate
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      updateObjectProperty('fill', '#3b82f6');
+                      updateObjectProperty('textColor', '#ffffff');
+                      updateObjectProperty('borderRadius', 6);
+                    }}
+                    className="px-2 py-1 bg-yellow-600 bg-opacity-30 hover:bg-opacity-50 text-yellow-200 rounded text-xs transition-colors"
+                  >
+                    Make Button
+                  </button>
+                </div>
               </div>
 
               {/* Actions */}
