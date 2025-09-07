@@ -1,4 +1,4 @@
-figma.showUI(__html__, { width: 420, height: 620 });
+figma.showUI(__html__, { width: 420, height: 280 });
 
 figma.ui.onmessage = async (msg) => {
   if (msg.type === "wireframe-json") {

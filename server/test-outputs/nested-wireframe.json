@@ -1,0 +1,51 @@
+{
+  "json": {
+    "title": "Contact Form",
+    "components": [
+      {
+        "type": "text",
+        "label": "Contact Us",
+        "x": 150,
+        "y": 30,
+        "fontSize": 28,
+        "fontWeight": "bold"
+      },
+      {
+        "type": "container",
+        "label": "Personal Information",
+        "x": 50,
+        "y": 100,
+        "width": 400,
+        "height": 300,
+        "components": [
+          {
+            "type": "text",
+            "label": "Personal Information",
+            "x": 20,
+            "y": 20,
+            "fontSize": 18,
+            "fontWeight": "bold"
+          },
+          {
+            "type": "input",
+            "label": "First Name",
+            "x": 20,
+            "y": 60,
+            "width": 170,
+            "height": 40,
+            "placeholder": "Enter your first name"
+          },
+          {
+            "type": "input",
+            "label": "Last Name",
+            "x": 210,
+            "y": 60,
+            "width": 170,
+            "height": 40,
+            "placeholder": "Enter your last name"
+          }
+        ]
+      }
+    ]
+  }
+}
