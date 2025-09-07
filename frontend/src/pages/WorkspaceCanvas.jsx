@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { Stage, Layer, Rect, Text, Group } from 'react-konva';
 import Konva from 'konva';
 import { 
@@ -9,6 +9,7 @@ import {
 
 const WorkspaceCanvas = () => {
   const { projectName } = useParams();
+  const location = useLocation();
   
   // Chat states
   const [messages, setMessages] = useState([]);
@@ -30,6 +31,7 @@ const WorkspaceCanvas = () => {
   const [canvasHistory, setCanvasHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [performance, setPerformance] = useState({ fps: 60, components: 0 });
+  const [quickLoading, setQuickLoading] = useState(false);
   
   const stageRef = useRef(null);
   const layerRef = useRef(null);
@@ -41,6 +43,36 @@ const WorkspaceCanvas = () => {
     "Build a dashboard with charts",
     "Make a contact form layout"
   ];
+
+  // Quick load wireframes from project data
+  useEffect(() => {
+    if (location.state?.quickLoad && location.state?.wireframeData) {
+      const { wireframeData, projectData, templateData, isTemplate } = location.state;
+      
+      if (wireframeData && wireframeData.length > 0) {
+        // Load the first wireframe instantly
+        const firstWireframe = wireframeData[0];
+        setWireframeData(firstWireframe);
+        
+        if (firstWireframe.pages && firstWireframe.pages.length > 0) {
+          const firstPage = firstWireframe.pages[0];
+          setCurrentPageId(firstPage.id);
+          setWireframeComponents(firstPage.components || []);
+        }
+        
+        // Add success message
+        const message = isTemplate 
+          ? `🎨 Template "${templateData.name}" loaded successfully! Start customizing your design.`
+          : `✨ Loaded "${projectData.name}" with ${wireframeData.length} wireframe(s). Ready to continue designing!`;
+          
+        setMessages([{
+          type: 'assistant',
+          content: message,
+          timestamp: new Date().toISOString()
+        }]);
+      }
+    }
+  }, [location.state]);
 
   // Auto-scroll chat messages
   useEffect(() => {
@@ -193,24 +225,87 @@ const WorkspaceCanvas = () => {
     const centerX = getCanvasSize().width / 2;
     const centerY = getCanvasSize().height / 2;
     
+    const componentConfigs = {
+      text: {
+        width: 150, height: 40, text: 'Sample Text',
+        fill: 'transparent', textColor: '#374151', fontSize: 16,
+        borderWidth: 0, borderRadius: 0
+      },
+      button: {
+        width: 120, height: 40, text: 'Button',
+        fill: '#3b82f6', textColor: '#ffffff', fontSize: 14,
+        borderWidth: 0, borderRadius: 8, fontWeight: 'bold'
+      },
+      input: {
+        width: 200, height: 40, text: 'Enter text...',
+        fill: '#ffffff', textColor: '#9ca3af', fontSize: 14,
+        borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6
+      },
+      image: {
+        width: 200, height: 150, text: '🖼️ Image Placeholder',
+        fill: '#f3f4f6', textColor: '#6b7280', fontSize: 14,
+        borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8
+      },
+      container: {
+        width: 300, height: 200, text: 'Container',
+        fill: '#f9fafb', textColor: '#374151', fontSize: 12,
+        borderWidth: 2, borderColor: '#e5e7eb', borderRadius: 8
+      },
+      navigation: {
+        width: 400, height: 60, text: 'Home | About | Services | Contact',
+        fill: '#1f2937', textColor: '#ffffff', fontSize: 14,
+        borderWidth: 0, borderRadius: 0, fontWeight: 'medium'
+      },
+      card: {
+        width: 250, height: 180, text: 'Card Title\n\nCard content goes here...',
+        fill: '#ffffff', textColor: '#374151', fontSize: 14,
+        borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12
+      },
+      list: {
+        width: 200, height: 120, text: '• List item 1\n• List item 2\n• List item 3',
+        fill: 'transparent', textColor: '#374151', fontSize: 14,
+        borderWidth: 0, borderRadius: 0
+      },
+      form: {
+        width: 300, height: 250, text: 'Form\n\nName: [____]\nEmail: [____]\n\n[Submit]',
+        fill: '#ffffff', textColor: '#374151', fontSize: 12,
+        borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8
+      },
+      table: {
+        width: 350, height: 150, text: 'Header 1 | Header 2 | Header 3\nRow 1    | Data 1   | Data 2\nRow 2    | Data 3   | Data 4',
+        fill: '#ffffff', textColor: '#374151', fontSize: 12,
+        borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6
+      },
+      chart: {
+        width: 300, height: 200, text: '📊 Chart Visualization',
+        fill: '#f8fafc', textColor: '#475569', fontSize: 16,
+        borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8
+      },
+      modal: {
+        width: 400, height: 250, text: 'Modal Title\n\nModal content goes here...\n\n[Close] [Save]',
+        fill: '#ffffff', textColor: '#374151', fontSize: 14,
+        borderWidth: 2, borderColor: '#374151', borderRadius: 12
+      }
+    };
+
+    const config = componentConfigs[type] || componentConfigs.text;
+    
     const newComponent = {
       id: Date.now(),
       type,
-      x: centerX - 75,
-      y: centerY - 20,
-      width: type === 'text' ? 150 : (type === 'button' ? 200 : 250),
-      height: type === 'text' ? 40 : (type === 'button' ? 50 : 40),
-      text: type === 'button' ? 'Button' : 
-            type === 'input' ? 'Input field...' : 
-            type === 'text' ? 'Sample Text' : 'Component',
-      fill: type === 'button' ? '#3b82f6' : '#ffffff',
-      textColor: type === 'button' ? '#ffffff' : '#374151',
-      fontSize: 14,
+      x: centerX - config.width / 2,
+      y: centerY - config.height / 2,
+      width: config.width,
+      height: config.height,
+      text: config.text,
+      fill: config.fill,
+      textColor: config.textColor,
+      fontSize: config.fontSize,
       fontFamily: 'Arial',
-      fontWeight: 'normal',
-      borderColor: '#d1d5db',
-      borderWidth: 1,
-      borderRadius: type === 'button' ? 6 : 4,
+      fontWeight: config.fontWeight || 'normal',
+      borderColor: config.borderColor || '#d1d5db',
+      borderWidth: config.borderWidth,
+      borderRadius: config.borderRadius,
       opacity: 1
     };
     
@@ -762,7 +857,7 @@ const WorkspaceCanvas = () => {
             )}
 
             {/* Component Toolbar */}
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 flex-wrap">
               <span className="text-sm text-gray-300 mr-2">Add:</span>
               <button
                 onClick={() => addComponent('text')}
@@ -784,6 +879,69 @@ const WorkspaceCanvas = () => {
               >
                 <Plus className="w-3 h-3" />
                 <span>Input</span>
+              </button>
+              <button
+                onClick={() => addComponent('image')}
+                className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Image</span>
+              </button>
+              <button
+                onClick={() => addComponent('container')}
+                className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Container</span>
+              </button>
+              <button
+                onClick={() => addComponent('navigation')}
+                className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Navigation</span>
+              </button>
+              <button
+                onClick={() => addComponent('card')}
+                className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Card</span>
+              </button>
+              <button
+                onClick={() => addComponent('list')}
+                className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                <span>List</span>
+              </button>
+              <button
+                onClick={() => addComponent('form')}
+                className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Form</span>
+              </button>
+              <button
+                onClick={() => addComponent('table')}
+                className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Table</span>
+              </button>
+              <button
+                onClick={() => addComponent('chart')}
+                className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Chart</span>
+              </button>
+              <button
+                onClick={() => addComponent('modal')}
+                className="flex items-center space-x-1 px-3 py-1 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Modal</span>
               </button>
             </div>
           </div>

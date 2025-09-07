@@ -151,6 +151,15 @@ export default function Dashboard() {
                   Templates
                 </Link>
                 <Link
+                  to="/chat"
+                  className="text-white/60 hover:text-white hover:bg-white/10 px-3 py-2 rounded-lg transition-colors flex items-center space-x-2"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10c1.09 0 2.09-.18 3.04-.52l4.52 1.52c.25.08.52 0 .7-.22.18-.22.18-.52 0-.74L18.48 19.5C20.38 17.69 22 15.24 22 12.5c0-5.52-4.48-10-10-10zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8c0 2.03-.76 3.89-2.01 5.31l1.46 2.46-2.46-1.46C16.89 19.24 14.53 20 12 20z"/>
+                  </svg>
+                  <span>Figma Chat</span>
+                </Link>
+                <Link
                   to="/team"
                   className="text-white/60 hover:text-white hover:bg-white/10 px-3 py-2 rounded-lg transition-colors"
                 >
