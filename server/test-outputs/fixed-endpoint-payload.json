@@ -1,0 +1,69 @@
+{
+  "title": "Login Screen",
+  "components": [
+    {
+      "type": "input",
+      "label": "",
+      "x": 400,
+      "y": 225,
+      "width": 250,
+      "height": 40,
+      "fontSize": 16,
+      "fontFamily": "Open Sans",
+      "textColor": "#333333",
+      "placeholder": "Username",
+      "border": "1px solid #cccccc"
+    },
+    {
+      "type": "input",
+      "label": "",
+      "x": 400,
+      "y": 275,
+      "width": 250,
+      "height": 40,
+      "fontSize": 16,
+      "fontFamily": "Open Sans",
+      "textColor": "#333333",
+      "placeholder": "Password",
+      "border": "1px solid #cccccc"
+    },
+    {
+      "type": "button",
+      "label": "Login",
+      "x": 400,
+      "y": 325,
+      "width": 250,
+      "height": 40,
+      "fontSize": 16,
+      "fontFamily": "Open Sans",
+      "textColor": "#ffffff",
+      "backgroundColor": "#4CAF50",
+      "border": "none"
+    },
+    {
+      "type": "button",
+      "label": "Create Account",
+      "x": 400,
+      "y": 375,
+      "width": 250,
+      "height": 40,
+      "fontSize": 16,
+      "fontFamily": "Open Sans",
+      "textColor": "#4CAF50",
+      "backgroundColor": "#f7f7f7",
+      "border": "1px solid #cccccc"
+    },
+    {
+      "type": "text",
+      "label": "Error Message",
+      "x": 400,
+      "y": 420,
+      "width": 250,
+      "height": 20,
+      "fontSize": 14,
+      "fontFamily": "Open Sans",
+      "textColor": "#ff0000",
+      "visible": false
+    }
+  ]
+}

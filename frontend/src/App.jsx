@@ -12,6 +12,7 @@ import Contact from './pages/Contact';
 import Onboarding from './pages/Onboarding';
 import WorkspaceCanvas from './pages/WorkspaceCanvas';
 import ProtectedRoute from './components/ProtectedRoute';
+import ChatPage from './pages/ChatPage';
 
 function App() {
   const { initialize } = useAuthStore();
@@ -51,6 +52,12 @@ function App() {
           
           {/* Development/Test Route - Direct access to WorkspaceCanvas */}
           <Route path="/test-workspace" element={<WorkspaceCanvas />} />
+
+          <Route path="/chat" element={
+            <ProtectedRoute>
+              <ChatPage />
+            </ProtectedRoute>
+          } />
           
           {/* Redirect unknown routes to home */}
           <Route path="*" element={<Navigate to="/" replace />} />

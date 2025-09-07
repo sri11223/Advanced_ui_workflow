@@ -97,96 +97,54 @@ async function generateWireframe(prompt) {
       
       Context from UX documents: {context}
       
+      IMPORTANT: Your response MUST follow the EXACT structure with a top-level "json" key.
+      
+      The Figma plugin in our project ONLY supports a FLAT array of components. It does NOT support nested components 
+      like containers with sub-components. Each component must be at the top level in the components array.
+      The size of the figma frame is 360x720 and position (x, y) of each component should be specified to avoid overlaps.
+
       Generate ONLY a JSON object with the following structure (no explanation, just the JSON):
       {{
-        "screen": "Name of the screen (e.g., 'Login Screen', 'Dashboard', etc.)",
-        "layout": {{
-          "width": 1440,
-          "height": 900,
-          "background": "#FFFFFF",
-          "padding": 40,
-          "contentAlignment": "center"
-        }},
-        "sections": [
-          {{
-            "name": "Header",
-            "position": {{ "x": 0, "y": 0 }},
-            "width": "100%",
-            "height": 80,
-            "backgroundColor": "#F5F5F5",
-            "elements": [
-              {{ "type": "logo", "position": {{ "x": 40, "y": 20 }}, "width": 120, "height": 40 }}
-            ]
-          }},
-          {{
-            "name": "Main Content",
-            "position": {{ "x": 0, "y": 120 }},
-            "width": "100%",
-            "alignment": "center"
-          }}
-        ],
-        "fields": [
-          {{
-            "name": "Username",
-            "type": "text",
-            "placeholder": "Enter username",
-            "position": {{ "x": "center", "y": 200 }},
-            "width": 300,
-            "height": 48,
-            "required": true,
-            "label": {{ "text": "Username", "position": "top" }}
-          }}
-        ],
-        "buttons": [
-          {{
-            "name": "Submit",
-            "type": "primary",
-            "position": {{ "x": "center", "y": 400 }},
-            "width": 150,
-            "height": 48,
-            "backgroundColor": "#3498DB",
-            "textColor": "#FFFFFF",
-            "borderRadius": 8,
-            "action": "submit"
-          }}
-        ],
-        "links": [
-          {{
-            "name": "Register Now",
-            "position": {{ "x": "center", "y": 470 }},
-            "fontSize": 14,
-            "textColor": "#3498DB",
-            "action": "navigate",
-            "destination": "register"
-          }}
-        ],
-        "designSystem": {{
-          "typography": {{
-            "fontFamily": "Inter, sans-serif",
-            "headings": {{ "fontWeight": 700, "color": "#333333" }},
-            "body": {{ "fontWeight": 400, "color": "#555555" }}
-          }},
-          "colors": {{
-            "primary": "#3498DB",
-            "secondary": "#2ECC71",
-            "accent": "#9B59B6",
-            "background": "#FFFFFF",
-            "text": "#333333",
-            "error": "#E74C3C"
-          }},
-          "spacing": {{
-            "xs": 4,
-            "sm": 8,
-            "md": 16,
-            "lg": 24,
-            "xl": 32
-          }}
+        "json": {{
+          "title": "Name of the screen (e.g., 'Login Screen', 'Dashboard', etc.)",
+          "components": [
+            {{
+              "type": "text",
+              "label": "Text Label",
+              "x": 150,
+              "y": 50,
+              "fontSize": 24,
+              "fontWeight": "bold"
+            }},
+            {{
+              "type": "input",
+              "label": "Input Label",
+              "x": 50,
+              "y": 120,
+              "width": 300,
+              "height": 40,
+              "placeholder": "Placeholder Text"
+            }},
+            {{
+              "type": "button",
+              "label": "Button Text",
+              "x": 50,
+              "y": 280,
+              "width": 300,
+              "backgroundColor": "#337ab7",
+              "textColor": "#ffffff"
+            }}
+          ]
         }}
       }}
       
-      The JSON must be properly formatted with no additional text or explanation.
-      Ensure your wireframe applies appropriate UX principles like information hierarchy, clear navigation, and consistent design patterns.
-      Make sure to include detailed position information, sizes, colors, and styling to make it useful for automatic generation in Figma.`
+      STRICTLY follow these requirements:
+      1. RETURN ONLY the JSON object with the "json" key at the top level
+      2. Use ONLY these component types: "text", "input", "button"
+      3. ALL components must be in a FLAT array (no nested components or containers)
+      4. Button components must use "label" for the button text (not "text")
+      5. DO NOT include any explanation text before or after the JSON
+      6. Ensure the JSON is valid and properly formatted`
     );
 
     const wireframePrompt = await wireframeTemplate.format({
@@ -202,76 +160,261 @@ async function generateWireframe(prompt) {
       console.log("Attempting to extract and parse JSON from LLM response");
 
       // Extract JSON from the response if it contains other text
-      const jsonMatch = responseContent.content?.match(/\{[\s\S]*\}/);
-      const jsonStr = jsonMatch
-        ? jsonMatch[0]
-        : responseContent.content || responseContent;
+      // First, try to clean up any markdown code blocks
+      const cleanedResponse = (responseContent.content || responseContent)
+        .replace(/```json/g, "")
+        .replace(/```/g, "")
+        .trim();
 
       // Use our robust JSON handler to parse and validate
-      const wireframeJson = JSONHandler.repairAndParse(jsonStr);
-      const validatedJson = JSONHandler.validateWireframeJSON(
-        wireframeJson,
-        `${prompt} Screen`
-      );
+      let wireframeJson = JSONHandler.repairAndParse(cleanedResponse);
+
+      // Ensure the wireframe has the correct structure with top-level "json" key
+      if (!wireframeJson.json) {
+        console.log("Wireframe missing top-level 'json' key, wrapping it");
+        wireframeJson = {
+          json: {
+            title: `${prompt} Screen`,
+            components: [],
+          },
+        };
+
+        // Try to convert the old format to the new format
+        if (wireframeJson.screen) {
+          wireframeJson.json.title = wireframeJson.screen;
+        }
+
+        // Convert fields to components if they exist
+        if (Array.isArray(wireframeJson.fields)) {
+          wireframeJson.json.components = wireframeJson.fields.map((field) => {
+            if (typeof field === "string") {
+              return {
+                type: "input",
+                label: field,
+                x: 50,
+                y: 120,
+                width: 300,
+                height: 40,
+                placeholder: `Enter ${field}`,
+              };
+            } else {
+              return {
+                type: field.type || "input",
+                label: field.name || field.label || "Field",
+                x: field.position ? field.position.x : 50,
+                y: field.position ? field.position.y : 120,
+                width: field.width || 300,
+                height: field.height || 40,
+                placeholder: field.placeholder || field.name || "Enter text",
+              };
+            }
+          });
+        }
+
+        // Add buttons as components if they exist
+        if (Array.isArray(wireframeJson.buttons)) {
+          wireframeJson.buttons.forEach((button, index) => {
+            if (typeof button === "string") {
+              wireframeJson.json.components.push({
+                type: "button",
+                label: button,
+                x: 50,
+                y: 200 + index * 60,
+                width: 300,
+                backgroundColor: "#337ab7",
+                textColor: "#ffffff",
+              });
+            } else {
+              wireframeJson.json.components.push({
+                type: "button",
+                label: button.name || button.text || "Button",
+                x: button.position ? button.position.x : 50,
+                y: button.position ? button.position.y : 200 + index * 60,
+                width: button.width || 300,
+                backgroundColor: button.backgroundColor || "#337ab7",
+                textColor: button.textColor || "#ffffff",
+              });
+            }
+          });
+        }
+      }
+
+      // Flatten any nested components structures
+      if (wireframeJson.json && wireframeJson.json.components) {
+        const flattenedComponents = [];
+
+        const flattenComponents = (components, parentX = 0, parentY = 0) => {
+          components.forEach((component) => {
+            // Skip if it's not an object
+            if (typeof component !== "object") return;
+
+            // Create a copy of the component without nested components
+            const flatComponent = { ...component };
+
+            // Adjust x and y based on parent coordinates if they're nested
+            if (parentX !== 0 || parentY !== 0) {
+              flatComponent.x = (flatComponent.x || 0) + parentX;
+              flatComponent.y = (flatComponent.y || 0) + parentY;
+            }
+
+            // Check for unsupported component types and convert them
+            if (!["text", "input", "button"].includes(flatComponent.type)) {
+              // Convert container/form to a text label
+              if (
+                flatComponent.type === "container" ||
+                flatComponent.type === "form"
+              ) {
+                flatComponent.type = "text";
+                flatComponent.label =
+                  flatComponent.label ||
+                  flatComponent.type.charAt(0).toUpperCase() +
+                    flatComponent.type.slice(1);
+                flatComponent.fontSize = flatComponent.fontSize || 16;
+              } else {
+                // Default to input for unknown types
+                flatComponent.type = "input";
+                flatComponent.label = flatComponent.label || flatComponent.type;
+                flatComponent.placeholder =
+                  flatComponent.placeholder || "Enter text";
+              }
+            }
+
+            // Remove any nested components array
+            const nestedComponents = flatComponent.components;
+            delete flatComponent.components;
+
+            // Ensure button text is in label property
+            if (
+              flatComponent.type === "button" &&
+              flatComponent.text &&
+              !flatComponent.label
+            ) {
+              flatComponent.label = flatComponent.text;
+              delete flatComponent.text;
+            }
+
+            // Add to flattened components
+            flattenedComponents.push(flatComponent);
+
+            // Process nested components if they exist
+            if (Array.isArray(nestedComponents)) {
+              flattenComponents(
+                nestedComponents,
+                flatComponent.x,
+                flatComponent.y
+              );
+            }
+          });
+        };
+
+        flattenComponents(wireframeJson.json.components);
+        wireframeJson.json.components = flattenedComponents;
+      }
 
       console.log("Successfully generated wireframe JSON");
-      return validatedJson;
+      return wireframeJson;
     } catch (jsonError) {
       console.error("Error processing wireframe JSON:", jsonError);
 
       // Attempt recovery with a simpler prompt
       console.log("Attempting recovery with simpler prompt");
       try {
-        const simplePrompt = `Create a simple JSON wireframe for a "${prompt}" screen with these properties: "screen", "fields", "buttons", and "links".`;
+        const simplePrompt = `Create a JSON wireframe for a "${prompt}" screen. IMPORTANT: The response MUST have a top-level "json" key containing "title" and "components" array. Example: {"json": {"title": "Screen Title", "components": [{"type": "text", "label": "Text", "x": 50, "y": 50}]}}`;
         const fallbackResponse = await llmClient.invoke(simplePrompt, {
           skipCache: true,
         });
 
         // Parse and validate the fallback response
-        const fallbackJson = JSONHandler.repairAndParse(
-          fallbackResponse.content || fallbackResponse
-        );
-        return JSONHandler.validateWireframeJSON(
-          fallbackJson,
-          `${prompt} Screen`
-        );
+        const cleanedResponse = (fallbackResponse.content || fallbackResponse)
+          .replace(/```json/g, "")
+          .replace(/```/g, "")
+          .trim();
+
+        let fallbackJson = JSONHandler.repairAndParse(cleanedResponse);
+
+        // Ensure the fallback has the correct structure
+        if (!fallbackJson.json) {
+          console.log("Fallback missing json key, creating minimal structure");
+          fallbackJson = {
+            json: {
+              title: `${prompt} Screen`,
+              components: [
+                {
+                  type: "text",
+                  label: `${prompt} Screen`,
+                  x: 150,
+                  y: 50,
+                  fontSize: 24,
+                  fontWeight: "bold",
+                },
+                {
+                  type: "input",
+                  label: "Input Field",
+                  x: 50,
+                  y: 120,
+                  width: 300,
+                  height: 40,
+                  placeholder: "Enter text",
+                },
+                {
+                  type: "button",
+                  label: "Submit",
+                  x: 50,
+                  y: 200,
+                  width: 300,
+                  backgroundColor: "#337ab7",
+                  textColor: "#ffffff",
+                },
+              ],
+            },
+          };
+        }
+
+        return fallbackJson;
       } catch (fallbackError) {
         console.error("Fallback also failed:", fallbackError);
 
         // Return a minimal valid wireframe as last resort
         return {
-          screen: `${prompt} Screen`,
-          layout: {
-            width: 1440,
-            height: 900,
-            background: "#FFFFFF",
-            padding: 40,
-            contentAlignment: "center",
-          },
-          fields: ["Input Field 1", "Input Field 2"],
-          buttons: ["Submit"],
-          links: ["Help", "Back"],
-          designSystem: {
-            typography: {
-              fontFamily: "Inter, sans-serif",
-              headings: { fontWeight: 700, color: "#333333" },
-              body: { fontWeight: 400, color: "#555555" },
-            },
-            colors: {
-              primary: "#3498DB",
-              secondary: "#2ECC71",
-              accent: "#9B59B6",
-              background: "#FFFFFF",
-              text: "#333333",
-              error: "#E74C3C",
-            },
-            spacing: {
-              xs: 4,
-              sm: 8,
-              md: 16,
-              lg: 24,
-              xl: 32,
-            },
+          json: {
+            title: `${prompt} Screen`,
+            components: [
+              {
+                type: "text",
+                label: `${prompt} Screen`,
+                x: 150,
+                y: 50,
+                fontSize: 24,
+                fontWeight: "bold",
+              },
+              {
+                type: "input",
+                label: "Input Field 1",
+                x: 50,
+                y: 120,
+                width: 300,
+                height: 40,
+                placeholder: "Enter text",
+              },
+              {
+                type: "input",
+                label: "Input Field 2",
+                x: 50,
+                y: 180,
+                width: 300,
+                height: 40,
+                placeholder: "Enter text",
+              },
+              {
+                type: "button",
+                label: "Submit",
+                x: 50,
+                y: 240,
+                width: 300,
+                backgroundColor: "#337ab7",
+                textColor: "#ffffff",
+              },
+            ],
           },
         };
       }
@@ -540,59 +683,36 @@ router.post("/generate-wireframe", async (req, res) => {
 
       // Return a fallback wireframe if generation fails
       res.status(200).json({
-        screen: `${prompt} Screen`,
-        layout: {
-          width: 1440,
-          height: 900,
-          background: "#FFFFFF",
-          padding: 40,
-          contentAlignment: "center",
-        },
-        fields: [
-          {
-            name: "Input Field",
-            type: "text",
-            position: { x: "center", y: 200 },
-            width: 300,
-            height: 48,
-          },
-        ],
-        buttons: [
-          {
-            name: "Submit",
-            type: "primary",
-            position: { x: "center", y: 300 },
-            width: 150,
-            height: 48,
-          },
-        ],
-        links: [
-          {
-            name: "Help",
-            position: { x: "center", y: 370 },
-          },
-        ],
-        designSystem: {
-          typography: {
-            fontFamily: "Inter, sans-serif",
-            headings: { fontWeight: 700, color: "#333333" },
-            body: { fontWeight: 400, color: "#555555" },
-          },
-          colors: {
-            primary: "#3498DB",
-            secondary: "#2ECC71",
-            accent: "#9B59B6",
-            background: "#FFFFFF",
-            text: "#333333",
-            error: "#E74C3C",
-          },
-          spacing: {
-            xs: 4,
-            sm: 8,
-            md: 16,
-            lg: 24,
-            xl: 32,
-          },
+        json: {
+          title: `${prompt} Screen`,
+          components: [
+            {
+              type: "text",
+              label: `${prompt} Screen`,
+              x: 150,
+              y: 50,
+              fontSize: 24,
+              fontWeight: "bold",
+            },
+            {
+              type: "input",
+              label: "Input Field",
+              x: 50,
+              y: 120,
+              width: 300,
+              height: 40,
+              placeholder: "Enter text",
+            },
+            {
+              type: "button",
+              label: "Submit",
+              x: 50,
+              y: 180,
+              width: 300,
+              backgroundColor: "#337ab7",
+              textColor: "#ffffff",
+            },
+          ],
         },
         fallback: true,
         error: wireframeError.message,
@@ -680,10 +800,54 @@ async function updateWireframe(existingWireframe, prompt) {
       User's requested changes:
       {prompt}
       
-      Generate ONLY an updated JSON object with the same structure as the existing wireframe.
-      The JSON must be properly formatted with no additional text or explanation.
-      Ensure your updated wireframe applies appropriate UX principles and maintains design consistency.
-      Do not add new fields or properties that weren't in the original JSON structure.`
+      IMPORTANT: Your response MUST follow the EXACT same JSON structure as the input, including keeping the top-level "json" key.
+      
+      The Figma plugin in our project ONLY supports a FLAT array of components. It does NOT support nested components 
+      like containers with sub-components. Each component must be at the top level in the components array.
+      
+      The REQUIRED output format is:
+      {{
+        "json": {{
+          "title": "Screen Name",
+          "components": [
+            {{
+              "type": "text",
+              "label": "Text Label",
+              "x": 150,
+              "y": 50,
+              "fontSize": 24,
+              "fontWeight": "bold"
+            }},
+            {{
+              "type": "input",
+              "label": "Input Label",
+              "x": 50,
+              "y": 120,
+              "width": 300,
+              "height": 40,
+              "placeholder": "Placeholder Text"
+            }},
+            {{
+              "type": "button",
+              "label": "Button Text",
+              "x": 50,
+              "y": 280,
+              "width": 300,
+              "backgroundColor": "#337ab7",
+              "textColor": "#ffffff"
+            }}
+            // other components...
+          ]
+        }}
+      }}
+      
+      STRICTLY follow these requirements:
+      1. RETURN ONLY the JSON object with the "json" key at the top level
+      2. Use ONLY these component types: "text", "input", "button"
+      3. ALL components must be in a FLAT array (no nested components or containers)
+      4. Button components must use "label" for the button text (not "text")
+      5. DO NOT include any explanation text before or after the JSON
+      6. Ensure the JSON is valid and properly formatted`
     );
 
     const updatePrompt = await updateTemplate.format({
@@ -731,17 +895,164 @@ async function updateWireframe(existingWireframe, prompt) {
 
     // Parse the response to extract the JSON wireframe
     try {
-      // Import and use the JSONHandler.repairAndParse method
-      const updatedWireframe = JSONHandler.repairAndParse(responseString);
+      // First, try to clean up any markdown code blocks
+      const cleanedResponse = responseString
+        .replace(/```json/g, "")
+        .replace(/```/g, "")
+        .trim();
 
-      if (!updatedWireframe) {
-        throw new Error(
-          "Failed to parse the updated wireframe JSON from LLM response"
-        );
+      // Import and use the JSONHandler.repairAndParse method
+      let parsedWireframe = JSONHandler.repairAndParse(cleanedResponse);
+
+      // Log the parsed structure for debugging
+      console.log("Parsed wireframe keys:", Object.keys(parsedWireframe));
+
+      // Validate that the wireframe has the correct structure
+      if (!parsedWireframe.json) {
+        console.log("Wireframe missing top-level 'json' key, wrapping it");
+        // If the response didn't include the top-level 'json' key, add it
+        parsedWireframe = { json: parsedWireframe };
       }
 
+      // Validate that the structure inside json is correct
+      if (!parsedWireframe.json.components && parsedWireframe.json.fields) {
+        console.log(
+          "Converting old format (fields) to new format (components)"
+        );
+        // Convert from the old format to the new format if needed
+        parsedWireframe.json.components = parsedWireframe.json.fields.map(
+          (field) => {
+            return {
+              type: field.type || "input",
+              label: field.name || field.label || "Field",
+              x: field.position ? field.position.x : 50,
+              y: field.position ? field.position.y : 100,
+              width: field.width || 300,
+              height: field.height || 40,
+              placeholder: field.placeholder || field.label,
+            };
+          }
+        );
+
+        // Add buttons if they exist
+        if (parsedWireframe.json.buttons) {
+          parsedWireframe.json.buttons.forEach((button) => {
+            parsedWireframe.json.components.push({
+              type: "button",
+              label: button.name || button.text || "Button",
+              x: button.position ? button.position.x : 50,
+              y: button.position ? button.position.y : 200,
+              width: button.width || 300,
+              backgroundColor: button.backgroundColor || "#337ab7",
+              textColor: button.textColor || "#ffffff",
+            });
+          });
+        }
+      }
+
+      // Flatten any nested components structures
+      if (parsedWireframe.json && parsedWireframe.json.components) {
+        const flattenedComponents = [];
+
+        const flattenComponents = (components, parentX = 0, parentY = 0) => {
+          components.forEach((component) => {
+            // Skip if it's not an object
+            if (typeof component !== "object") return;
+
+            // Create a copy of the component without nested components
+            const flatComponent = { ...component };
+
+            // Adjust x and y based on parent coordinates if they're nested
+            if (parentX !== 0 || parentY !== 0) {
+              flatComponent.x = (flatComponent.x || 0) + parentX;
+              flatComponent.y = (flatComponent.y || 0) + parentY;
+            }
+
+            // Check for unsupported component types and convert them
+            if (!["text", "input", "button"].includes(flatComponent.type)) {
+              // Convert container/form to a text label
+              if (
+                flatComponent.type === "container" ||
+                flatComponent.type === "form"
+              ) {
+                flatComponent.type = "text";
+                flatComponent.label =
+                  flatComponent.label ||
+                  flatComponent.type.charAt(0).toUpperCase() +
+                    flatComponent.type.slice(1);
+                flatComponent.fontSize = flatComponent.fontSize || 16;
+              } else {
+                // Default to input for unknown types
+                flatComponent.type = "input";
+                flatComponent.label = flatComponent.label || flatComponent.type;
+                flatComponent.placeholder =
+                  flatComponent.placeholder || "Enter text";
+              }
+            }
+
+            // Remove any nested components array
+            const nestedComponents = flatComponent.components;
+            delete flatComponent.components;
+
+            // Ensure button text is in label property
+            if (
+              flatComponent.type === "button" &&
+              flatComponent.text &&
+              !flatComponent.label
+            ) {
+              flatComponent.label = flatComponent.text;
+              delete flatComponent.text;
+            }
+
+            // Add to flattened components
+            flattenedComponents.push(flatComponent);
+
+            // Process nested components if they exist
+            if (Array.isArray(nestedComponents)) {
+              flattenComponents(
+                nestedComponents,
+                flatComponent.x,
+                flatComponent.y
+              );
+            }
+          });
+        };
+
+        flattenComponents(parsedWireframe.json.components);
+        parsedWireframe.json.components = flattenedComponents;
+      }
+
+      // Final validation of the wireframe structure
+      if (!parsedWireframe.json || !parsedWireframe.json.components) {
+        console.log("Creating minimal wireframe structure");
+        // Create a minimal valid structure
+        parsedWireframe = {
+          json: {
+            title: "Updated Wireframe",
+            components: [
+              {
+                type: "text",
+                label: "Updated based on user prompt",
+                x: 150,
+                y: 50,
+                fontSize: 24,
+                fontWeight: "bold",
+              },
+            ],
+          },
+        };
+      }
+
+      // Ensure title exists
+      if (!parsedWireframe.json.title) {
+        parsedWireframe.json.title = "Updated Wireframe";
+      }
+
+      console.log("Final wireframe structure:", Object.keys(parsedWireframe));
+      console.log("JSON sub-structure:", Object.keys(parsedWireframe.json));
+
       console.log("Successfully updated wireframe based on user prompt");
-      return updatedWireframe;
+      return parsedWireframe;
     } catch (parseError) {
       console.error("Error parsing the LLM response:", parseError);
       throw new Error(

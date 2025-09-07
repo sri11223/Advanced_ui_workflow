@@ -1,0 +1,96 @@
+{
+  "json": {
+    "title": "Contact Form",
+    "components": [
+      {
+        "type": "text",
+        "label": "Contact Us",
+        "x": 150,
+        "y": 30,
+        "fontSize": 28,
+        "fontWeight": "bold"
+      },
+      {
+        "type": "container",
+        "label": "Personal Information",
+        "x": 50,
+        "y": 100,
+        "width": 400,
+        "height": 300,
+        "components": [
+          {
+            "type": "text",
+            "label": "Personal Information",
+            "x": 20,
+            "y": 20,
+            "fontSize": 18,
+            "fontWeight": "bold"
+          },
+          {
+            "type": "input",
+            "label": "First Name",
+            "x": 20,
+            "y": 60,
+            "width": 170,
+            "height": 40,
+            "placeholder": "Enter your first name"
+          },
+          {
+            "type": "input",
+            "label": "Last Name",
+            "x": 210,
+            "y": 60,
+            "width": 170,
+            "height": 40,
+            "placeholder": "Enter your last name"
+          },
+          {
+            "type": "input",
+            "label": "Email",
+            "x": 20,
+            "y": 130,
+            "width": 360,
+            "height": 40,
+            "placeholder": "Enter your email address"
+          }
+        ]
+      },
+      {
+        "type": "form",
+        "label": "Message",
+        "x": 50,
+        "y": 420,
+        "width": 400,
+        "height": 200,
+        "components": [
+          {
+            "type": "text",
+            "label": "Your Message",
+            "x": 20,
+            "y": 20,
+            "fontSize": 18,
+            "fontWeight": "bold"
+          },
+          {
+            "type": "input",
+            "label": "Message",
+            "x": 20,
+            "y": 60,
+            "width": 360,
+            "height": 80,
+            "placeholder": "Type your message here"
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "Submit",
+        "x": 200,
+        "y": 640,
+        "width": 120,
+        "backgroundColor": "#337ab7",
+        "textColor": "#ffffff"
+      }
+    ]
+  }
+}
