@@ -10,6 +10,7 @@ import Features from './pages/Features';
 import About from './pages/About';
 import Contact from './pages/Contact';
 import Onboarding from './pages/Onboarding';
+import WorkspaceCanvas from './pages/WorkspaceCanvas';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -42,6 +43,14 @@ function App() {
               <Dashboard />
             </ProtectedRoute>
           } />
+          <Route path="/workspace/:projectName" element={
+            <ProtectedRoute>
+              <WorkspaceCanvas />
+            </ProtectedRoute>
+          } />
+          
+          {/* Development/Test Route - Direct access to WorkspaceCanvas */}
+          <Route path="/test-workspace" element={<WorkspaceCanvas />} />
           
           {/* Redirect unknown routes to home */}
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -234,10 +234,12 @@ export default function Dashboard() {
                         <List className="w-4 h-4" />
                       </Button>
                     </div>
-                    <Button className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600">
-                      <Plus className="w-4 h-4 mr-2" />
-                      New Project
-                    </Button>
+                    <Link to="/workspace/:projectName">
+                      <Button className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600">
+                        <Plus className="w-4 h-4 mr-2" />
+                        New Project
+                      </Button>
+                    </Link>
                   </div>
                 </div>
 
@@ -323,10 +325,12 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      <Button className="w-full justify-start bg-white/5 hover:bg-white/10 border border-white/20" variant="ghost">
-                        <Plus className="w-4 h-4 mr-2" />
-                        Create New Project
-                      </Button>
+                      <Link to="/create-project">
+                        <Button className="w-full justify-start bg-white/5 hover:bg-white/10 border border-white/20" variant="ghost">
+                          <Plus className="w-4 h-4 mr-2" />
+                          Create New Project
+                        </Button>
+                      </Link>
                       <Button className="w-full justify-start bg-white/5 hover:bg-white/10 border border-white/20" variant="ghost">
                         <Copy className="w-4 h-4 mr-2" />
                         Import Design
