@@ -229,17 +229,30 @@ app.post("/figma/update", async (req, res) => {
     // Store the updated wireframe as the new context
     latestWireframeContext = updatedWireframe;
 
-    // For Figma plugin compatibility, ensure we have a properly formatted object
-    // If the wireframe is already in Figma format (has components array), use it directly
-    // Otherwise, convert it using the convertToFigmaFormat function
-    const figmaWireframe = updatedWireframe.components
-      ? updatedWireframe
-      : convertToFigmaFormat(updatedWireframe);
+    // Validate the wireframe structure before broadcasting
+    if (!updatedWireframe.json) {
+      console.log("Adding missing json key to updatedWireframe");
+      updatedWireframe = { json: updatedWireframe };
+    }
 
-    console.log("Figma wireframe format:", Object.keys(figmaWireframe));
+    console.log(
+      "Broadcasting wireframe with structure:",
+      JSON.stringify({
+        hasJsonKey: !!updatedWireframe.json,
+        jsonKeys: updatedWireframe.json
+          ? Object.keys(updatedWireframe.json)
+          : [],
+        hasComponents:
+          updatedWireframe.json && !!updatedWireframe.json.components,
+        componentsLength:
+          updatedWireframe.json && updatedWireframe.json.components
+            ? updatedWireframe.json.components.length
+            : 0,
+      })
+    );
 
     // Broadcast the updated wireframe to all connected Figma plugins
-    broadcastToFigma({ type: "wireframe-json", data: figmaWireframe });
+    broadcastToFigma({ type: "wireframe-json", data: updatedWireframe.json });
 
     res.json({ status: "ok", data: updatedWireframe });
   } catch (error) {
