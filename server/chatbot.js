@@ -896,13 +896,110 @@ async function updateWireframe(existingWireframe, prompt) {
     // Parse the response to extract the JSON wireframe
     try {
       // First, try to clean up any markdown code blocks
-      const cleanedResponse = responseString
+      let cleanedResponse = responseString
         .replace(/```json/g, "")
         .replace(/```/g, "")
         .trim();
 
+      console.log("Cleaned response length:", cleanedResponse.length);
+      console.log("First 200 chars:", cleanedResponse.substring(0, 200));
+
+      // Check around position 1022 if the response is long enough
+      if (cleanedResponse.length > 1000) {
+        console.log(
+          "Content around position 1022:",
+          cleanedResponse.substring(1000, 1050)
+        );
+      }
+
+      // Pre-clean common JSON issues before sending to JSONHandler
+      cleanedResponse = cleanedResponse
+        // Remove any text before the first {
+        .replace(/^[^{]*/, "")
+        // Remove any text after the last }
+        .replace(/}[^}]*$/, "}")
+        // Fix common quote issues
+        .replace(/'/g, '"')
+        // Fix unquoted property names
+        .replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":')
+        // Remove trailing commas
+        .replace(/,(\s*[}\]])/g, "$1")
+        // Fix line breaks in strings
+        .replace(/:\s*"([^"]*)[\n\r]+([^"]*)"/g, ':"$1 $2"');
+
+      console.log("Pre-cleaned response length:", cleanedResponse.length);
+
       // Import and use the JSONHandler.repairAndParse method
-      let parsedWireframe = JSONHandler.repairAndParse(cleanedResponse);
+      let parsedWireframe;
+      try {
+        parsedWireframe = JSONHandler.repairAndParse(cleanedResponse);
+      } catch (jsonError) {
+        console.error(
+          "JSONHandler failed, trying manual fallback:",
+          jsonError.message
+        );
+
+        // Log more details about the problematic JSON
+        const errorMatch = jsonError.message.match(/position (\d+)/);
+        if (errorMatch) {
+          const errorPos = parseInt(errorMatch[1]);
+          console.log(
+            "Error position context:",
+            cleanedResponse.substring(Math.max(0, errorPos - 50), errorPos + 50)
+          );
+        }
+
+        // Try a more aggressive manual cleanup
+        try {
+          let manuallyCleanedJson = cleanedResponse
+            // Remove any remaining markdown or comments
+            .replace(/\/\/.*$/gm, "")
+            .replace(/\/\*[\s\S]*?\*\//g, "")
+            // Ensure proper boolean and null values
+            .replace(/:\s*true(?=\s*[,}\]])/gi, ": true")
+            .replace(/:\s*false(?=\s*[,}\]])/gi, ": false")
+            .replace(/:\s*null(?=\s*[,}\]])/gi, ": null")
+            // Fix numbers that might have quotes
+            .replace(/:\s*"(\d+)"(?=\s*[,}\]])/g, ": $1")
+            // Remove any duplicate commas
+            .replace(/,+/g, ",")
+            // Fix spacing issues
+            .replace(/\s+/g, " ");
+
+          console.log("Attempting manual JSON.parse with cleaned JSON");
+          parsedWireframe = JSON.parse(manuallyCleanedJson);
+          console.log("Manual JSON parsing succeeded!");
+        } catch (manualError) {
+          console.error(
+            "Manual JSON parsing also failed:",
+            manualError.message
+          );
+
+          // Last resort: try to extract just the components array if it exists
+          try {
+            const componentsMatch = cleanedResponse.match(
+              /"components"\s*:\s*\[([\s\S]*?)\]/
+            );
+            if (componentsMatch) {
+              console.log("Attempting to extract just components array...");
+              const componentsJson = `{"title": "Fallback Wireframe", "components": [${componentsMatch[1]}]}`;
+              const fallbackJson = JSON.parse(componentsJson);
+              parsedWireframe = { json: fallbackJson };
+              console.log(
+                "Successfully extracted components array as fallback"
+              );
+            } else {
+              throw new Error(
+                `Unable to parse JSON. Error: ${manualError.message}`
+              );
+            }
+          } catch (fallbackError) {
+            throw new Error(
+              `All JSON parsing attempts failed. Last error: ${fallbackError.message}`
+            );
+          }
+        }
+      }
 
       // Log the parsed structure for debugging
       console.log("Parsed wireframe keys:", Object.keys(parsedWireframe));

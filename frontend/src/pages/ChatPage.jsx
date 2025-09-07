@@ -9,6 +9,7 @@ export default function ChatPage() {
   const [totalQuestions, setTotalQuestions] = useState(0);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [lastResponse, setLastResponse] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Load sessionId from localStorage on component mount
   useEffect(() => {
@@ -32,6 +33,8 @@ export default function ChatPage() {
 
   const handleSendMessage = async () => {
     if (!newMessage) return;
+
+    setIsLoading(true); // Start loading
 
     if (!sessionId) {
       console.log("Starting new session with prompt:", prompt);
@@ -71,6 +74,8 @@ export default function ChatPage() {
         setNewMessage("");
       } catch (error) {
         console.error("Error starting questionnaire:", error);
+      } finally {
+        setIsLoading(false); // End loading
       }
       return;
     }
@@ -91,30 +96,39 @@ export default function ChatPage() {
       setLastResponse(response.data);
 
       // Update current question count from API response
-      const { currentQuestion: apiCurrentQuestion, totalQuestions: apiTotalQuestions } = response.data;
+      const {
+        currentQuestion: apiCurrentQuestion,
+        totalQuestions: apiTotalQuestions,
+      } = response.data;
       setCurrentQuestion(apiCurrentQuestion);
       setTotalQuestions(apiTotalQuestions);
 
-      console.log(`Question progress: ${apiCurrentQuestion}/${apiTotalQuestions}`);
+      console.log(
+        `Question progress: ${apiCurrentQuestion}/${apiTotalQuestions}`
+      );
       console.log("Response data:", response.data);
 
       // Check if questionnaire is complete - wireframe data indicates completion
-      const isComplete = (
+      const isComplete =
         response.data.completed === true ||
-        (response.data.wireframe && response.data.wireframe.json)
-      );
+        (response.data.wireframe && response.data.wireframe.json);
 
       if (isComplete) {
-        console.log("Questionnaire completed! Preparing to call Figma generate API...");
+        console.log(
+          "Questionnaire completed! Preparing to call Figma generate API..."
+        );
 
         // Check if response has wireframe data
         if (response.data.wireframe && response.data.wireframe.json) {
           console.log("Wireframe data found:", response.data.wireframe.json);
           try {
-            console.log("Calling Figma generate API with data:", response.data.wireframe.json);
+            console.log(
+              "Calling Figma generate API with data:",
+              response.data.wireframe.json
+            );
             const figmaResponse = await axios.post(
               "http://localhost:5000/figma/generate",
-              response.data.wireframe.json // Send only the JSON object from wireframe
+              { json: response.data.wireframe.json } // Wrap the JSON object in a json property
             );
 
             console.log("Figma generate response:", figmaResponse.data);
@@ -124,9 +138,10 @@ export default function ChatPage() {
               ...prev,
               {
                 type: "completion",
-                content: "Questionnaire completed! Figma design generated successfully!",
+                content:
+                  "Questionnaire completed! Figma design generated successfully!",
                 figmaData: figmaResponse.data,
-                wireframeData: response.data.wireframe.json
+                wireframeData: response.data.wireframe.json,
               },
             ]);
 
@@ -178,6 +193,8 @@ export default function ChatPage() {
           content: "Error processing your answer. Please try again.",
         },
       ]);
+    } finally {
+      setIsLoading(false); // End loading
     }
   };
 
@@ -189,8 +206,7 @@ export default function ChatPage() {
             <h1 className="text-2xl font-bold">UI/UX Design Questionnaire</h1>
             {sessionId && (
               <div className="mt-2 text-sm text-gray-300">
-                Session: {sessionId} | Progress: {currentQuestion}/
-                {totalQuestions}
+                Session: {sessionId}
               </div>
             )}
           </div>
@@ -211,9 +227,6 @@ export default function ChatPage() {
             {msg.type === "question" && (
               <div className="flex justify-start">
                 <div className="inline-block p-3 rounded-lg bg-blue-600 max-w-2xl">
-                  <div className="text-xs text-blue-200 mb-1">
-                    Question {msg.currentQuestion}/{msg.totalQuestions}
-                  </div>
                   <div>{msg.content}</div>
                 </div>
               </div>
@@ -244,10 +257,14 @@ export default function ChatPage() {
                         Generated Wireframe: {msg.wireframeData.title}
                       </div>
                       <div className="text-xs text-purple-300">
-                        Components: {msg.wireframeData.components?.length || 0} elements
+                        Components: {msg.wireframeData.components?.length || 0}{" "}
+                        elements
                       </div>
                       <div className="text-xs text-purple-300 mt-1">
-                        Types: {msg.wireframeData.components?.map(c => c.type).join(', ') || 'None'}
+                        Types:{" "}
+                        {msg.wireframeData.components
+                          ?.map((c) => c.type)
+                          .join(", ") || "None"}
                       </div>
                     </div>
                   )}
@@ -271,6 +288,18 @@ export default function ChatPage() {
             )}
           </div>
         ))}
+
+        {/* Loading indicator */}
+        {isLoading && (
+          <div className="mb-4 flex justify-start">
+            <div className="inline-block p-3 rounded-lg bg-gray-600 max-w-2xl">
+              <div className="flex items-center space-x-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                <span>Processing your request...</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="p-4 bg-gray-800 border-t border-gray-700">
@@ -278,6 +307,7 @@ export default function ChatPage() {
           <input
             type="text"
             value={newMessage}
+            disabled={isLoading}
             onChange={(e) => {
               setNewMessage(e.target.value);
               if (!sessionId) {
@@ -285,43 +315,36 @@ export default function ChatPage() {
               }
             }}
             placeholder={
-              !sessionId
+              isLoading
+                ? "Processing..."
+                : !sessionId
                 ? "Describe your UI/UX project to start the questionnaire..."
                 : "Type your answer..."
             }
-            className="w-full px-4 py-3 border-none focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-700 text-white rounded-l-lg"
+            className="w-full px-4 py-3 border-none focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-700 text-white rounded-l-lg disabled:bg-gray-600 disabled:cursor-not-allowed"
             onKeyPress={(e) => {
-              if (e.key === "Enter") {
+              if (e.key === "Enter" && !isLoading) {
                 handleSendMessage();
               }
             }}
           />
           <button
             onClick={handleSendMessage}
-            disabled={!newMessage.trim()}
+            disabled={!newMessage.trim() || isLoading}
             className="px-6 py-3 bg-green-500 hover:bg-green-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold rounded-r-lg transition-colors"
           >
-            {!sessionId ? "Start" : "Send"}
+            {isLoading ? (
+              <div className="flex items-center space-x-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                <span>Processing...</span>
+              </div>
+            ) : !sessionId ? (
+              "Start"
+            ) : (
+              "Send"
+            )}
           </button>
         </div>
-
-        {sessionId && totalQuestions > 0 && (
-          <div className="mt-3">
-            <div className="w-full bg-gray-600 rounded-full h-2">
-              <div
-                className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                style={{
-                  width: `${(currentQuestion / totalQuestions) * 100}%`,
-                }}
-              ></div>
-            </div>
-            <div className="text-sm text-gray-400 mt-1 text-center">
-              {currentQuestion > totalQuestions
-                ? "Questionnaire complete!"
-                : `${totalQuestions - currentQuestion + 1} questions remaining`}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

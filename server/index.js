@@ -176,20 +176,95 @@ function broadcastToFigma(msg) {
       }
     }
 
-    const str = JSON.stringify(msg);
+    // Validate and clean the message before stringifying
+    let cleanedMsg = { ...msg };
+
+    // Ensure the data is properly structured
+    if (cleanedMsg.data && typeof cleanedMsg.data === "object") {
+      // Deep clone to avoid modifying original
+      cleanedMsg.data = JSON.parse(JSON.stringify(cleanedMsg.data));
+
+      // Validate required properties for wireframe
+      if (cleanedMsg.type === "wireframe-json") {
+        if (!cleanedMsg.data.title) {
+          cleanedMsg.data.title = "Wireframe";
+        }
+        if (!cleanedMsg.data.components) {
+          cleanedMsg.data.components = [];
+        }
+        if (!Array.isArray(cleanedMsg.data.components)) {
+          console.warn("Components is not an array, converting...");
+          cleanedMsg.data.components = [];
+        }
+      }
+    }
+
+    let str;
+    try {
+      str = JSON.stringify(cleanedMsg, null, 0); // Compact JSON
+    } catch (stringifyError) {
+      console.error("Error stringifying message:", stringifyError);
+
+      // Fallback: create a simple error message
+      str = JSON.stringify({
+        type: "error",
+        message: "Failed to serialize wireframe data",
+        error: stringifyError.message,
+      });
+    }
+
     console.log("Message size (bytes):", str.length);
+
+    // Validate the JSON string before sending
+    try {
+      JSON.parse(str); // Test parse to ensure it's valid
+    } catch (testParseError) {
+      console.error("Generated JSON is invalid:", testParseError.message);
+      console.log("First 500 chars of invalid JSON:", str.substring(0, 500));
+
+      // Send error message instead
+      str = JSON.stringify({
+        type: "error",
+        message: "Invalid JSON generated on server",
+        error: testParseError.message,
+      });
+    }
 
     if (figmaClients.length === 0) {
       console.warn("No Figma clients connected to receive the message");
       return;
     }
 
-    figmaClients.forEach((c) => c.send(str));
+    figmaClients.forEach((c) => {
+      try {
+        c.send(str);
+      } catch (sendError) {
+        console.error("Error sending to individual client:", sendError);
+      }
+    });
+
     console.log(
       `Broadcasted wireframe to ${figmaClients.length} Figma plugin clients`
     );
   } catch (error) {
     console.error("Error broadcasting to Figma:", error);
+
+    // Try to send an error message to clients
+    if (figmaClients.length > 0) {
+      const errorMsg = JSON.stringify({
+        type: "error",
+        message: "Server error while broadcasting",
+        error: error.message,
+      });
+
+      figmaClients.forEach((c) => {
+        try {
+          c.send(errorMsg);
+        } catch (sendError) {
+          console.error("Failed to send error message:", sendError);
+        }
+      });
+    }
   }
 }
 

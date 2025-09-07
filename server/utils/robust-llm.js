@@ -93,7 +93,7 @@ class RobustLLMClient {
     try {
       clients["groq-backup"] = new ChatGroq({
         apiKey: process.env.GROQ_API_KEY,
-        model: "llama-3.1-70b-instant", // Use a different model as backup
+        model: "llama-3.1-8b-instant", // Use a different model as backup
         temperature: 0.3,
         maxTokens: undefined,
         maxRetries: 1,

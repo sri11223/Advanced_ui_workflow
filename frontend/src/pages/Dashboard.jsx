@@ -331,7 +331,10 @@ export default function Dashboard() {
                         <List className="w-4 h-4" />
                       </Button>
                     </div>
-                    <Button className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600">
+                    <Button className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600" onClick={(e) => {
+                      e.preventDefault();
+                      navigate("/chat");
+                    }} >
                       <Plus className="w-4 h-4 mr-2" />
                       New Project
                     </Button>
@@ -439,7 +442,10 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      <Button className="w-full justify-start bg-white/5 hover:bg-white/10 border border-white/20" variant="ghost">
+                      <Button className="w-full justify-start bg-white/5 hover:bg-white/10 border border-white/20" variant="ghost" onClick={(e) => {
+                        e.preventDefault();
+                        navigate("/chat");
+                      }} >
                         <Plus className="w-4 h-4 mr-2" />
                         Create New Project
                       </Button>

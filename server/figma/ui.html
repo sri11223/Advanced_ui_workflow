@@ -95,12 +95,76 @@
       socket.onmessage = (event) => {
         try {
           log("Received WebSocket message");
-          const msg = JSON.parse(event.data);
+          console.log("Raw WebSocket data:", event.data);
+          console.log("Data type:", typeof event.data);
+          console.log("Data length:", event.data.length);
+
+          // Check if data is too long and log a sample
+          if (event.data.length > 1000) {
+            console.log("First 200 chars:", event.data.substring(0, 200));
+            console.log(
+              "Around position 1022:",
+              event.data.substring(1000, 1050)
+            );
+            console.log(
+              "Last 200 chars:",
+              event.data.substring(event.data.length - 200)
+            );
+          }
+
+          let msg;
+          try {
+            msg = JSON.parse(event.data);
+          } catch (parseError) {
+            console.error("JSON parse error:", parseError.message);
+            log(`❌ JSON Parse Error: ${parseError.message}`);
+
+            // Try to clean the data before parsing
+            let cleanedData = event.data
+              // Remove any BOM or invisible characters
+              .replace(/^\uFEFF/, "")
+              // Remove any control characters except newline, tab, carriage return
+              .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+              // Fix any escaped quotes that might be causing issues
+              .replace(/\\"/g, '"')
+              // Remove any trailing commas before closing braces/brackets
+              .replace(/,(\s*[}\]])/g, "$1")
+              // Ensure proper spacing around colons and commas
+              .replace(/:\s*([^",{\[\s][^",}\]]*)\s*([,}\]])/g, ': "$1"$2');
+
+            console.log("Attempting to parse cleaned data...");
+
+            try {
+              msg = JSON.parse(cleanedData);
+              log("✅ Successfully parsed cleaned JSON");
+            } catch (cleanError) {
+              console.error(
+                "Cleaned JSON parse also failed:",
+                cleanError.message
+              );
+              log(
+                `❌ Unable to parse WebSocket message: ${cleanError.message}`
+              );
+              return;
+            }
+          }
+
           console.log("WebSocket message received:", msg);
 
           if (msg.type === "wireframe-json") {
             log("📥 Processing wireframe data");
             console.log("Wireframe data keys:", Object.keys(msg.data || {}));
+
+            // Validate the wireframe data structure before forwarding
+            if (!msg.data) {
+              log("❌ No data in wireframe message");
+              return;
+            }
+
+            if (typeof msg.data !== "object") {
+              log("❌ Wireframe data is not an object");
+              return;
+            }
 
             // Forward JSON to code.js
             parent.postMessage(
@@ -112,8 +176,9 @@
             log(`Received message of type: ${msg.type || "unknown"}`);
           }
         } catch (err) {
-          log(`❌ Invalid WS message: ${err.message}`);
+          log(`❌ WebSocket message error: ${err.message}`);
           console.error("WebSocket message error:", err);
+          console.error("Stack trace:", err.stack);
         }
       };
 

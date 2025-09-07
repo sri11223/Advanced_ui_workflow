@@ -21,15 +21,61 @@ async function initializeRetriever() {
 // Initialize retriever immediately
 initializeRetriever().catch(console.error);
 
+// Helper function to check if the input is a greeting
+function checkIfGreeting(prompt) {
+  const greetings = [
+    "hi",
+    "hello",
+    "hey",
+    "greetings",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "sup",
+    "what's up",
+    "howdy",
+    "hiya",
+    "yo",
+  ];
+
+  const lowerPrompt = prompt.toLowerCase().trim();
+
+  // Check if the prompt is just a greeting or starts with a greeting
+  return (
+    greetings.some(
+      (greeting) =>
+        lowerPrompt === greeting ||
+        lowerPrompt.startsWith(greeting + " ") ||
+        lowerPrompt.startsWith(greeting + "!")
+    ) || lowerPrompt.length < 10
+  ); // Very short messages are likely greetings
+}
+
+// Generate friendly greeting questions
+function generateGreetingQuestions() {
+  return [
+    "Hi there! 👋 I'm excited to help you create an amazing wireframe! What kind of interface or screen would you like me to help you design today?",
+    "Great! Now I'd love to learn more about your vision. What are the main goals you want users to achieve with this interface?",
+    "Awesome! What specific features or functionality should be included in your wireframe?",
+    "Perfect! Are there any particular design preferences, brand guidelines, or visual style you'd like me to consider?",
+  ];
+}
+
 // Generate follow-up questions based on the initial wireframe request
 async function generateFollowUpQuestions(prompt) {
   try {
     const llm = new ChatGroq({
       model: "llama-3.3-70b-versatile",
-      temperature: 0.2,
+      temperature: 0.3,
       maxTokens: undefined,
       maxRetries: 3,
     });
+
+    // Check if this is a greeting or casual message
+    const isGreeting = checkIfGreeting(prompt);
+    if (isGreeting) {
+      return generateGreetingQuestions();
+    }
 
     // Retrieve UX design principles and guidelines related to the wireframe
     const uxQueries = [
@@ -56,7 +102,7 @@ async function generateFollowUpQuestions(prompt) {
 
     // Create prompt to generate follow-up questions
     const questionsTemplate = PromptTemplate.fromTemplate(
-      `You are a UX design expert helping gather requirements for wireframe creation.
+      `You are a friendly UX design expert and wireframe assistant helping gather requirements for wireframe creation.
             
             The user wants a wireframe for: {initialPrompt}
             
@@ -64,22 +110,29 @@ async function generateFollowUpQuestions(prompt) {
             
             {context}
             
-            Generate 2-4 specific follow-up questions that would help clarify the wireframe requirements. 
-            The questions should cover:
-            1. User needs and goals
-            2. Key functionality requirements
-            3. Content organization preferences
-            4. User flow priorities
-            5. Visual hierarchy preferences
+            Generate 3-4 friendly, conversational follow-up questions that would help clarify the wireframe requirements. 
+            Make the questions sound natural and engaging, like you're having a friendly conversation with a colleague.
             
-            Format your response as a JSON array of questions only:
+            The questions should cover:
+            1. User needs and goals (who will use this and what do they want to accomplish?)
+            2. Key functionality requirements (what features are essential?)
+            3. Content organization preferences (how should information be structured?)
+            4. User flow priorities (what's the most important user journey?)
+            
+            Make each question sound friendly and conversational. Use phrases like:
+            - "I'd love to know more about..."
+            - "Could you tell me..."
+            - "What would you say..."
+            - "How do you envision..."
+            
+            Format your response as a JSON array of friendly questions:
             
             {{
                 "questions": [
-                    "Question 1?",
-                    "Question 2?",
-                    "Question 3?",
-                    "Question 4?"
+                    "Friendly question 1?",
+                    "Engaging question 2?",
+                    "Conversational question 3?",
+                    "Natural question 4?"
                 ]
             }}
             `
@@ -109,13 +162,12 @@ async function generateFollowUpQuestions(prompt) {
     return questionsJson.questions || [];
   } catch (error) {
     console.error("Error generating follow-up questions:", error);
-    // Return default questions if there's an error
+    // Return friendly default questions if there's an error
     return [
-      "What are the primary user goals for this interface?",
-      "What key features or functionality should be included?",
-      "Are there specific brand guidelines or visual preferences to consider?",
-      "What content elements are most important to highlight?",
-      "Are there any specific user flows that need to be supported?",
+      "I'd love to know more about who will be using this interface - what are their main goals? 🎯",
+      "What key features or functionality would you say are absolutely essential for this wireframe? ✨",
+      "How do you envision the content being organized? Any specific sections or areas you'd like to highlight? 📋",
+      "Are there any particular design preferences, brand colors, or visual style you'd like me to keep in mind? 🎨",
     ];
   }
 }
@@ -191,16 +243,30 @@ questionnaireRouter.post("/start", async (req, res) => {
     // Generate a session ID
     const sessionId = Date.now().toString();
 
-    // Generate follow-up questions
-    const questions = await generateFollowUpQuestions(prompt);
+    // Check if this is a greeting and handle accordingly
+    const isGreeting = checkIfGreeting(prompt);
+
+    let questions;
+    let initialPrompt = prompt;
+
+    if (isGreeting) {
+      // For greetings, use predefined friendly questions
+      questions = generateGreetingQuestions();
+      // Store the greeting as the initial prompt, we'll get the real wireframe request later
+      initialPrompt = "greeting";
+    } else {
+      // Generate follow-up questions based on wireframe request
+      questions = await generateFollowUpQuestions(prompt);
+    }
 
     // Store the session
     activeSessions.set(sessionId, {
-      initialPrompt: prompt,
+      initialPrompt: initialPrompt,
       questions,
       answers: {},
       currentQuestionIndex: 0,
       completed: false,
+      isGreetingFlow: isGreeting,
     });
 
     res.json({
@@ -234,6 +300,11 @@ questionnaireRouter.post("/answer", async (req, res) => {
     const currentQuestion = session.questions[session.currentQuestionIndex];
     session.answers[currentQuestion] = answer;
 
+    // Special handling for greeting flow - capture the wireframe request from the first answer
+    if (session.isGreetingFlow && session.currentQuestionIndex === 0) {
+      session.initialPrompt = answer; // The first answer contains the actual wireframe request
+    }
+
     // Move to the next question
     session.currentQuestionIndex++;
 
@@ -241,9 +312,17 @@ questionnaireRouter.post("/answer", async (req, res) => {
     if (session.currentQuestionIndex >= session.questions.length) {
       session.completed = true;
 
+      // Determine the actual wireframe request
+      let wireframeRequest = session.initialPrompt;
+      if (session.isGreetingFlow) {
+        // For greeting flow, the wireframe request is in the first answer
+        const firstQuestion = session.questions[0];
+        wireframeRequest = session.answers[firstQuestion];
+      }
+
       // Process answers and generate wireframe
       const detailedRequest = await processAnswersAndGenerateWireframe(
-        session.initialPrompt,
+        wireframeRequest,
         session.answers
       );
 
