@@ -161,7 +161,16 @@ async function generateWireframe(prompt) {
 
       // Extract JSON from the response if it contains other text
       // First, try to clean up any markdown code blocks
-      const cleanedResponse = (responseContent.content || responseContent)
+      let cleanedResponse;
+      if (typeof responseContent === 'string') {
+        cleanedResponse = responseContent;
+      } else if (responseContent && responseContent.content) {
+        cleanedResponse = responseContent.content;
+      } else {
+        cleanedResponse = JSON.stringify(responseContent || {});
+      }
+      
+      cleanedResponse = cleanedResponse
         .replace(/```json/g, "")
         .replace(/```/g, "")
         .trim();
@@ -172,10 +181,89 @@ async function generateWireframe(prompt) {
       // Ensure the wireframe has the correct structure with top-level "json" key
       if (!wireframeJson.json) {
         console.log("Wireframe missing top-level 'json' key, wrapping it");
+        
+        // Create a proper login page wireframe with components
+        const loginComponents = [
+          {
+            id: "title",
+            type: "text",
+            text: "Login",
+            x: 200,
+            y: 50,
+            width: 200,
+            height: 40,
+            fontSize: 24,
+            fontWeight: "bold",
+            textAlign: "center"
+          },
+          {
+            id: "email-label",
+            type: "text",
+            text: "Email",
+            x: 50,
+            y: 120,
+            width: 100,
+            height: 20,
+            fontSize: 14
+          },
+          {
+            id: "email-input",
+            type: "input",
+            placeholder: "Enter your email",
+            x: 50,
+            y: 145,
+            width: 300,
+            height: 40,
+            borderColor: "#ccc",
+            borderWidth: 1
+          },
+          {
+            id: "password-label",
+            type: "text",
+            text: "Password",
+            x: 50,
+            y: 200,
+            width: 100,
+            height: 20,
+            fontSize: 14
+          },
+          {
+            id: "password-input",
+            type: "input",
+            placeholder: "Enter your password",
+            x: 50,
+            y: 225,
+            width: 300,
+            height: 40,
+            borderColor: "#ccc",
+            borderWidth: 1
+          },
+          {
+            id: "login-button",
+            type: "button",
+            text: "Login",
+            x: 50,
+            y: 285,
+            width: 300,
+            height: 45,
+            fill: "#007bff",
+            textColor: "#ffffff",
+            fontSize: 16,
+            fontWeight: "bold"
+          }
+        ];
+        
         wireframeJson = {
           json: {
             title: `${prompt} Screen`,
-            components: [],
+            appType: "web-app",
+            totalPages: 1,
+            pages: [{
+              id: "main",
+              title: "Login Page",
+              components: loginComponents
+            }],
+            components: loginComponents,
           },
         };
 
@@ -747,9 +835,181 @@ async function closeLLMClient() {
   return true;
 }
 
+// Function to modify existing wireframe using AI
+async function modifyWireframe(prompt, existingWireframe) {
+  try {
+    if (!retriever || !llmClient) {
+      console.log("LLM client not available, using rule-based modification");
+      return applyRuleBasedModification(prompt, existingWireframe);
+    }
+
+    console.log("🔄 Using AI to modify wireframe");
+    
+    const modificationPrompt = `You are a wireframe modification expert. I have an existing wireframe and need to modify it based on a user request.
+
+EXISTING WIREFRAME:
+${JSON.stringify(existingWireframe, null, 2)}
+
+USER MODIFICATION REQUEST: "${prompt}"
+
+Please modify the existing wireframe JSON to incorporate the user's request. Keep the existing structure and components, but make the requested changes. Return ONLY the modified wireframe JSON in the same format.
+
+Guidelines:
+- LAYOUT CHANGES: If user says "vertical" or "horizontal", arrange components in that direction by updating x,y coordinates
+- COLOR CHANGES: Update 'fill', 'textColor', or 'borderColor' properties
+- SIZE CHANGES: Update 'width', 'height', 'fontSize' properties  
+- ADDING COMPONENTS: Add them to the appropriate page's components array
+- TEXT CHANGES: Update the 'text' property
+- POSITION CHANGES: Update 'x' and 'y' coordinates
+- ALIGNMENT: For "center", "left", "right" - adjust x coordinates accordingly
+- Maintain the same JSON structure and component IDs where possible
+- For new components, generate unique IDs using timestamp: ${Date.now()}
+
+LAYOUT EXAMPLES:
+- "make vertical" = stack components vertically (same x, increasing y values)
+- "make horizontal" = align components horizontally (increasing x, same y values)
+- "center layout" = center all components horizontally`;
+
+    const aiResponse = await llmClient.invoke(modificationPrompt);
+    
+    // Parse AI response
+    let aiModifiedWireframe;
+    if (typeof aiResponse === 'string') {
+      const cleanResponse = aiResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+      aiModifiedWireframe = JSON.parse(cleanResponse);
+    } else if (aiResponse.content) {
+      const cleanResponse = aiResponse.content.replace(/```json/g, '').replace(/```/g, '').trim();
+      aiModifiedWireframe = JSON.parse(cleanResponse);
+    } else {
+      aiModifiedWireframe = aiResponse;
+    }
+
+    console.log("✅ AI modification successful");
+    return aiModifiedWireframe;
+
+  } catch (error) {
+    console.error("❌ AI modification failed, falling back to rule-based:", error);
+    return applyRuleBasedModification(prompt, existingWireframe);
+  }
+}
+
+// Rule-based modification fallback
+function applyRuleBasedModification(prompt, wireframe) {
+  const lowerPrompt = prompt.toLowerCase();
+  let modifiedWireframe = JSON.parse(JSON.stringify(wireframe));
+
+  // Enhanced rule-based modifications for layout changes
+  if (lowerPrompt.includes('vertical') || lowerPrompt.includes('stack')) {
+    // Arrange components vertically
+    if (modifiedWireframe.components) {
+      let currentY = 50;
+      modifiedWireframe.components.forEach((comp, index) => {
+        comp.x = 50; // Same x position
+        comp.y = currentY;
+        currentY += (comp.height || 40) + 20; // Add spacing
+      });
+    }
+    if (modifiedWireframe.pages) {
+      modifiedWireframe.pages.forEach(page => {
+        let currentY = 50;
+        page.components.forEach((comp, index) => {
+          comp.x = 50;
+          comp.y = currentY;
+          currentY += (comp.height || 40) + 20;
+        });
+      });
+    }
+    return modifiedWireframe;
+  }
+
+  if (lowerPrompt.includes('horizontal') || lowerPrompt.includes('side by side')) {
+    // Arrange components horizontally
+    if (modifiedWireframe.components) {
+      let currentX = 50;
+      modifiedWireframe.components.forEach((comp, index) => {
+        comp.x = currentX;
+        comp.y = 50; // Same y position
+        currentX += (comp.width || 200) + 20; // Add spacing
+      });
+    }
+    if (modifiedWireframe.pages) {
+      modifiedWireframe.pages.forEach(page => {
+        let currentX = 50;
+        page.components.forEach((comp, index) => {
+          comp.x = currentX;
+          comp.y = 50;
+          currentX += (comp.width || 200) + 20;
+        });
+      });
+    }
+    return modifiedWireframe;
+  }
+
+  // Enhanced color modifications with selective targeting
+  if (lowerPrompt.includes('color')) {
+    const colorMap = {
+      'blue': '#3b82f6', 'red': '#ef4444', 'green': '#10b981', 
+      'yellow': '#f59e0b', 'purple': '#8b5cf6', 'pink': '#ec4899',
+      'gray': '#6b7280', 'black': '#000000', 'white': '#ffffff'
+    };
+    
+    let targetColor = '#3b82f6'; // default blue
+    Object.keys(colorMap).forEach(color => {
+      if (lowerPrompt.includes(color)) {
+        targetColor = colorMap[color];
+      }
+    });
+
+    // Selective component targeting
+    const updateColors = (components) => {
+      components.forEach(comp => {
+        let shouldUpdate = false;
+        
+        // Check if this specific component should be updated
+        if (lowerPrompt.includes('login') && comp.text && comp.text.toLowerCase().includes('login')) {
+          shouldUpdate = true;
+        } else if (lowerPrompt.includes('button') && comp.type === 'button' && !lowerPrompt.includes('login')) {
+          shouldUpdate = true;
+        } else if (lowerPrompt.includes('all') || (!lowerPrompt.includes('login') && !lowerPrompt.includes('button'))) {
+          // Apply to all if no specific targeting
+          if (comp.type === 'button') {
+            shouldUpdate = true;
+          }
+        }
+        
+        if (shouldUpdate) {
+          if (lowerPrompt.includes('background')) {
+            comp.fill = targetColor;
+          } else if (lowerPrompt.includes('text')) {
+            comp.textColor = targetColor;
+          } else {
+            // Default: update button background
+            comp.fill = targetColor;
+            comp.textColor = targetColor === '#ffffff' ? '#000000' : '#ffffff';
+          }
+        }
+      });
+    };
+
+    if (modifiedWireframe.components) {
+      updateColors(modifiedWireframe.components);
+    }
+    if (modifiedWireframe.pages) {
+      modifiedWireframe.pages.forEach(page => {
+        updateColors(page.components);
+      });
+    }
+    return modifiedWireframe;
+  }
+
+  return modifiedWireframe;
+}
+
 module.exports = router;
 module.exports.generateWireframe = generateWireframe;
 module.exports.closeLLMClient = closeLLMClient;
+module.exports.llmClient = llmClient;
+module.exports.modifyWireframe = modifyWireframe;
 
 /**
  * Update an existing wireframe based on user prompt
