@@ -21,7 +21,7 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "@huggingface/inference": "^1.5.1",
+    "@huggingface/inference": "^4.0.5",
     "@langchain/community": "^0.3.55",
     "@langchain/core": "^0.3.75",
     "@langchain/google-genai": "^0.0.6",
