@@ -29,7 +29,7 @@ const Projects = () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:8000/api/projects', {
+      const response = await fetch('https://advanced-ui-workflow.onrender.com/api/projects', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -130,7 +130,7 @@ const Projects = () => {
     try {
       // Fetch wireframes for this project
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:8000/api/projects/${project.id}/wireframes`, {
+      const response = await fetch(`https://advanced-ui-workflow.onrender.com/api/projects/${project.id}/wireframes`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'

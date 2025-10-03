@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = 'https://advanced-ui-workflow.onrender.com/api';
 
 const useAuthStore = create(
   persist(
