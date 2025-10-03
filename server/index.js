@@ -23,7 +23,17 @@ const questionnaireRouter = require("./questionnaire");
 
 // Initialize Express app
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:3000', 
+    'http://localhost:5173', 
+    'http://localhost:5174',
+    'https://advanced-ui-workflow-frontend.vercel.app'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(bodyParser.json({ limit: "10mb" }));
 
 const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
