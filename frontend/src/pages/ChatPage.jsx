@@ -37,7 +37,7 @@ export default function ChatPage() {
       console.log("Starting new session with prompt:", prompt);
       try {
         const response = await axios.post(
-          "http://localhost:5000/api/questionnaire/start",
+          "https://advanced-ui-workflow-1.onrender.com/api/questionnaire/start",
           { prompt: prompt }
         );
         console.log("Start response:", response.data);
@@ -83,7 +83,7 @@ export default function ChatPage() {
     // Handle answering questions
     try {
       const response = await axios.post(
-        `http://localhost:5000/api/questionnaire/answer`,
+        `https://advanced-ui-workflow-1.onrender.com/api/questionnaire/answer`,
         { sessionId: sessionId, answer: userAnswer }
       );
 
@@ -113,7 +113,7 @@ export default function ChatPage() {
           try {
             console.log("Calling Figma generate API with data:", response.data.wireframe.json);
             const figmaResponse = await axios.post(
-              "http://localhost:5000/figma/generate",
+              "https://advanced-ui-workflow-1.onrender.com/figma/generate",
               response.data.wireframe.json // Send only the JSON object from wireframe
             );
 

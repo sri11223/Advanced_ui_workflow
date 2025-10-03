@@ -366,7 +366,7 @@ const WorkspaceCanvas = () => {
         existingWireframe: existingWireframe || wireframeData
       };
 
-      const response = await fetch('http://localhost:5000/api/wireframe/generate', {
+      const response = await fetch('https://advanced-ui-workflow-1.onrender.com/api/wireframe/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
