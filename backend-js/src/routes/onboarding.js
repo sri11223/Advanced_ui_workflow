@@ -1,5 +1,5 @@
 const express = require('express');
-const { supabase } = require('../config/database');
+const { db } = require('../config/database');
 const auth = require('../middleware/auth');
 
 const router = express.Router();
@@ -13,74 +13,20 @@ router.post('/', auth, async (req, res) => {
     console.log('Onboarding POST request received:', req.body);
     const { user_id, role, responses, complexity_level, ai_preferences } = req.body;
     
-    // Prepare AI context data
-    const aiContextData = {
-      onboarding: {
-        role,
-        responses,
-        completed_at: new Date().toISOString(),
-        complexity_level
-      },
-      ai_preferences
-    };
-
-    // Save to ai_contexts table
-    const { data: contextData, error: contextError } = await supabase
-      .from('ai_contexts')
-      .upsert({
-        user_id,
-        context_data: aiContextData,
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'user_id'
-      });
-
-    if (contextError) throw contextError;
-
-    // Update users table with onboarding data
-    console.log('Updating users table for user_id:', user_id);
     const onboardingData = {
       role,
       responses,
       complexity_level,
+      ai_preferences,
       completed_at: new Date().toISOString()
     };
-    console.log('Onboarding data to save:', onboardingData);
 
-    const { data: userUpdateData, error: userError } = await supabase
-      .from('users')
-      .update({
-        onboarding_data: onboardingData,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', user_id);
-
-    console.log('Users table update result:', { userUpdateData, userError });
-    if (userError) throw userError;
-
-    // Also update user_profiles table if it exists
-    const profileData = {
-      role,
-      experience_level: responses.experience_level,
-      onboarding_completed: true,
-      updated_at: new Date().toISOString()
-    };
-
-    const { data: profileUpdateData, error: profileError } = await supabase
-      .from('user_profiles')
-      .upsert({
-        user_id,
-        ...profileData
-      }, {
-        onConflict: 'user_id'
-      });
-
-    if (profileError) throw profileError;
+    // Update user with onboarding data
+    await db.updateUser(user_id, { onboarding_data: onboardingData });
 
     res.json({ 
       success: true, 
-      message: 'Onboarding data saved successfully',
-      data: { contextData, userUpdateData, profileUpdateData }
+      message: 'Onboarding data saved successfully'
     });
 
   } catch (error) {
@@ -100,18 +46,11 @@ router.get('/:userId', auth, async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // Get onboarding data from users table
-    const { data, error } = await supabase
-      .from('users')
-      .select('onboarding_data')
-      .eq('id', userId)
-      .single();
-
-    if (error && error.code !== 'PGRST116') throw error;
+    const user = await db.getUserById(userId);
 
     res.json({ 
       success: true, 
-      data: data?.onboarding_data || null 
+      data: user?.onboarding_data || null 
     });
 
   } catch (error) {
@@ -131,16 +70,8 @@ router.get('/:userId/status', auth, async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // Check onboarding data in users table
-    const { data, error } = await supabase
-      .from('users')
-      .select('onboarding_data')
-      .eq('id', userId)
-      .single();
-
-    if (error && error.code !== 'PGRST116') throw error;
-
-    const completed = data?.onboarding_data && Object.keys(data.onboarding_data).length > 0;
+    const user = await db.getUserById(userId);
+    const completed = user?.onboarding_data && Object.keys(user.onboarding_data).length > 0;
 
     res.json({ 
       success: true, 

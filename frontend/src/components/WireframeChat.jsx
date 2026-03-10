@@ -39,7 +39,7 @@ const WireframeChat = ({ onWireframeGenerated }) => {
     setIsLoading(true);
 
     try {
-      const response = await fetch('https://advanced-ui-workflow-1.onrender.com/api/wireframe/generate', {
+      const response = await fetch(`${import.meta.env.VITE_WIREFRAME_API_URL || 'http://localhost:5000'}/api/wireframe/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

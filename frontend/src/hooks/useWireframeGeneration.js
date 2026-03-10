@@ -2,6 +2,8 @@
 import { useState, useCallback, useEffect } from 'react';
 import { stateManager } from '../utils/wireframeStorage';
 
+const WIREFRAME_API_URL = import.meta.env.VITE_WIREFRAME_API_URL || 'http://localhost:5000';
+
 export const useWireframeGeneration = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [currentWireframe, setCurrentWireframe] = useState(null);
@@ -22,7 +24,7 @@ export const useWireframeGeneration = () => {
         isModification
       };
 
-      const response = await fetch('https://advanced-ui-workflow-1.onrender.com/api/wireframe/generate', {
+      const response = await fetch(`${WIREFRAME_API_URL}/api/wireframe/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody)

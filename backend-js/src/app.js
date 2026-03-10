@@ -96,7 +96,7 @@ class App {
     this.app.get('/health/database', (req, res) => {
       res.json({
         status: 'not_configured',
-        message: 'Supabase database not yet configured',
+        message: 'Database not yet configured',
         timestamp: new Date().toISOString()
       });
     });

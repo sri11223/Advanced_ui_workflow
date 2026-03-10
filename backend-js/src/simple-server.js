@@ -6,13 +6,13 @@ const fs = require('fs');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const OpenAI = require('openai');
-const { createClient } = require('@supabase/supabase-js');
+const { MongoDBService } = require('./config/mongodb');
 
 // Initialize DeepSeek API client using OpenAI SDK
 let deepSeekClient;
 try {
   const deepSeekApiKey = process.env.DEEPSEEK_API_KEY?.replace(/"/g, '').trim();
-  console.log('🧠 DeepSeek API Key loaded:', deepSeekApiKey ? `${deepSeekApiKey.substring(0, 10)}...` : 'NOT FOUND');
+  console.log('🧠 DeepSeek API Key loaded:', deepSeekApiKey ? 'YES' : 'NOT FOUND');
   
   if (deepSeekApiKey) {
     deepSeekClient = new OpenAI({
@@ -31,57 +31,68 @@ try {
 // Simple Express server for registration
 const app = express();
 
-// Middleware
-app.use(cors({
-  origin: [
-    'http://localhost:3000', 
-    'http://localhost:5173', 
+// Middleware - parse CORS_ORIGINS from env (supports JSON array or comma-separated)
+let corsOrigins;
+if (process.env.CORS_ORIGINS) {
+  try {
+    const parsed = JSON.parse(process.env.CORS_ORIGINS);
+    corsOrigins = Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    corsOrigins = process.env.CORS_ORIGINS.split(',').map(o => o.trim());
+  }
+} else {
+  corsOrigins = [
+    'http://localhost:3000',
+    'http://localhost:5173',
     'http://localhost:5174',
     'https://advanced-ui-workflow-frontend.vercel.app'
-  ],
+  ];
+}
+
+app.use(cors({
+  origin: corsOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Explicitly handle preflight for all routes
+app.options('*', cors({
+  origin: corsOrigins,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
 
-// In-memory user storage (fallback for demo)
+// In-memory user storage (fallback when DB unavailable)
 const users = new Map();
 
 // In-memory onboarding cache
 const onboardingCache = new Map();
 
-// Supabase configuration - will fallback to memory if connection fails
-const supabaseUrl = 'https://fbkddxynrmbxyiuhcssq.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZia2RkeHlucm1ieHlpdWhjc3NxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxNTE3OTQsImV4cCI6MjA3MjcyNzc5NH0.Yxgc4ld3uc1_QOvP966OE-Evtqd8uOTMDVVtM7kJzu0';
-const supabase = createClient(supabaseUrl, supabaseKey);
+// MongoDB connection
+const mongoDB = new MongoDBService();
+let useDB = false;
 
-// Test Supabase connection
-let useSupabase = true;
-async function testSupabaseConnection() {
+async function connectDatabase() {
+  const mongoUri = process.env.MONGODB_URI || '';
+  if (!mongoUri) {
+    console.log('⚠️ No MONGODB_URI configured, using in-memory storage');
+    useDB = false;
+    return;
+  }
   try {
-    console.log('🔍 Testing Supabase connection...');
-    console.log('URL:', supabaseUrl);
-    console.log('Key (first 20 chars):', supabaseKey.substring(0, 20) + '...');
-    
-    const { data, error } = await supabase.from('users').select('count').limit(1);
-    if (error) {
-      console.log('❌ Supabase connection failed:');
-      console.log('Error code:', error.code);
-      console.log('Error message:', error.message);
-      console.log('Error details:', error.details);
-      console.log('Error hint:', error.hint);
-      console.log('⚠️  Falling back to in-memory storage');
-      useSupabase = false;
-    } else {
-      console.log('✅ Supabase connection successful');
-      console.log('Test query result:', data);
+    const connected = await mongoDB.connect(mongoUri);
+    useDB = connected;
+    if (!connected) {
+      console.log('⚠️ Falling back to in-memory storage');
     }
   } catch (err) {
-    console.log('❌ Supabase connection error (catch block):');
-    console.log('Error:', err.message);
-    console.log('⚠️  Falling back to in-memory storage');
-    useSupabase = false;
+    console.log('❌ MongoDB connection error:', err.message);
+    console.log('⚠️ Falling back to in-memory storage');
+    useDB = false;
   }
 }
 
@@ -89,11 +100,31 @@ async function testSupabaseConnection() {
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-here';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
+// Auth middleware - verifies JWT token
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
 // Request logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
   if (req.body && Object.keys(req.body).length > 0) {
-    console.log('Request body:', req.body);
+    // Redact sensitive data from logs
+    const logBody = { ...req.body };
+    if (logBody.password) logBody.password = '[REDACTED]';
+    if (logBody.token) logBody.token = '[REDACTED]';
+    console.log('Request body:', logBody);
   }
   next();
 });
@@ -119,31 +150,44 @@ app.post('/api/auth/register', async (req, res) => {
       });
     }
 
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    // Validate password strength
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters long' });
+    }
+
+    // Validate full_name length
+    if (full_name.trim().length < 2 || full_name.trim().length > 100) {
+      return res.status(400).json({ error: 'Full name must be between 2 and 100 characters' });
+    }
+
     const userEmail = email.toLowerCase();
     let user;
 
-    if (useSupabase) {
-      console.log('Using Supabase database...');
+    if (useDB) {
+      console.log('Using MongoDB database...');
       
       // Check if user already exists
       console.log('Checking if user exists...');
-      const { data: existingUser, error: checkError } = await supabase
-        .from('users')
-        .select('id')
-        .eq('email', userEmail)
-        .single();
-
-      if (checkError && checkError.code !== 'PGRST116') {
-        console.error('Error checking existing user:', checkError);
+      try {
+        const existingUser = await mongoDB.getUserByEmail(userEmail);
+        if (existingUser) {
+          console.log('User already exists');
+          return res.status(400).json({ error: 'User already exists with this email' });
+        }
+      } catch (checkErr) {
+        console.error('Error checking existing user:', checkErr.message);
         console.log('Falling back to in-memory storage');
-        useSupabase = false;
-      } else if (existingUser) {
-        console.log('User already exists');
-        return res.status(400).json({ error: 'User already exists with this email' });
+        useDB = false;
       }
     }
 
-    if (!useSupabase) {
+    if (!useDB) {
       console.log('Using in-memory storage...');
       
       // Check if user already exists in memory
@@ -161,7 +205,7 @@ app.post('/api/auth/register', async (req, res) => {
     // Generate a unique ID for the user
     const userId = require('crypto').randomUUID();
     
-    // Create user data (matching your Supabase schema)
+    // Create user data
     const userData = {
       id: userId,
       email: userEmail,
@@ -173,22 +217,16 @@ app.post('/api/auth/register', async (req, res) => {
       updated_at: new Date().toISOString()
     };
 
-    if (useSupabase) {
-      console.log('Creating user in Supabase...');
-      const { data: supabaseUser, error: createError } = await supabase
-        .from('users')
-        .insert([userData])
-        .select()
-        .single();
-
-      if (createError) {
-        console.error('Error creating user in Supabase:', createError);
+    if (useDB) {
+      console.log('Creating user in MongoDB...');
+      try {
+        user = await mongoDB.createUser(userData);
+      } catch (createErr) {
+        console.error('Error creating user in MongoDB:', createErr.message);
         console.log('Falling back to in-memory storage');
-        useSupabase = false;
+        useDB = false;
         users.set(userEmail, userData);
         user = userData;
-      } else {
-        user = supabaseUser;
       }
     } else {
       console.log('Creating user in memory...');
@@ -237,23 +275,17 @@ app.post('/api/auth/login', async (req, res) => {
     const userEmail = email.toLowerCase();
     let user;
 
-    if (useSupabase) {
-      console.log('Looking up user in Supabase...');
-      const { data: supabaseUser, error: userError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('email', userEmail)
-        .single();
-
-      if (userError && userError.code !== 'PGRST116') {
-        console.log('Supabase error, falling back to memory');
-        useSupabase = false;
-      } else {
-        user = supabaseUser;
+    if (useDB) {
+      console.log('Looking up user in MongoDB...');
+      try {
+        user = await mongoDB.getUserByEmail(userEmail);
+      } catch (lookupErr) {
+        console.log('MongoDB error, falling back to memory');
+        useDB = false;
       }
     }
 
-    if (!useSupabase) {
+    if (!useDB) {
       console.log('Looking up user in memory...');
       user = users.get(userEmail);
     }
@@ -321,31 +353,22 @@ app.post('/api/onboarding', async (req, res) => {
 
     let storageMethod = 'cache';
 
-    // Then try to save to Supabase as backup
-    if (useSupabase) {
-      console.log('🔄 Also attempting to save to Supabase database...');
+    // Then try to save to MongoDB as backup
+    if (useDB) {
+      console.log('🔄 Also saving to MongoDB database...');
       try {
-        const { data: userUpdateData, error: userError } = await supabase
-          .from('users')
-          .update({
-            onboarding_data: onboardingData,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', user_id);
+        await mongoDB.updateUser(user_id, {
+          onboarding_data: onboardingData,
+        });
 
-        if (userError) {
-          console.log('⚠️ Supabase update failed:', userError);
-          throw userError;
-        }
-
-        console.log('✅ Onboarding data also saved to Supabase database');
+        console.log('✅ Onboarding data also saved to MongoDB database');
         storageMethod = 'cache+database';
       } catch (error) {
-        console.log('❌ Supabase save failed, but cache storage successful');
-        useSupabase = false;
+        console.log('❌ MongoDB save failed, but cache storage successful');
+        useDB = false;
       }
     } else {
-      console.log('📴 Supabase unavailable, using cache-only storage');
+      console.log('📴 Database unavailable, using cache-only storage');
     }
 
     res.json({
@@ -380,23 +403,14 @@ app.get('/api/onboarding/:userId', async (req, res) => {
       source = 'cache';
     }
 
-    // If not in cache, try Supabase as fallback
-    if (!onboardingData && useSupabase) {
-      console.log('🔄 Cache miss, checking Supabase database...');
+    // If not in cache, try MongoDB as fallback
+    if (!onboardingData && useDB) {
+      console.log('🔄 Cache miss, checking MongoDB database...');
       try {
-        const { data, error } = await supabase
-          .from('users')
-          .select('onboarding_data')
-          .eq('id', userId)
-          .single();
-
-        if (error && error.code !== 'PGRST116') {
-          throw error;
-        }
-
-        onboardingData = data?.onboarding_data;
+        const user = await mongoDB.getUserById(userId);
+        onboardingData = user?.onboarding_data;
         if (onboardingData) {
-          console.log('📊 Retrieved from Supabase database');
+          console.log('📊 Retrieved from MongoDB database');
           // Store in cache for future requests
           console.log('💾 Caching data from database for faster access...');
           onboardingCache.set(userId, onboardingData);
@@ -404,8 +418,8 @@ app.get('/api/onboarding/:userId', async (req, res) => {
           source = 'database';
         }
       } catch (error) {
-        console.log('❌ Supabase get failed:', error);
-        useSupabase = false;
+        console.log('❌ MongoDB get failed:', error.message);
+        useDB = false;
       }
     }
 
@@ -442,25 +456,16 @@ app.get('/api/onboarding/:userId/status', async (req, res) => {
       source = 'cache';
     }
 
-    // If not in cache, try Supabase as fallback
-    if (!completed && useSupabase) {
-      console.log('🔄 Cache miss, checking Supabase database for status...');
+    // If not in cache, try MongoDB as fallback
+    if (!completed && useDB) {
+      console.log('🔄 Cache miss, checking MongoDB database for status...');
       try {
-        const { data, error } = await supabase
-          .from('users')
-          .select('onboarding_data')
-          .eq('id', userId)
-          .single();
-
-        if (error && error.code !== 'PGRST116') {
-          throw error;
-        }
-
-        const dbData = data?.onboarding_data;
+        const user = await mongoDB.getUserById(userId);
+        const dbData = user?.onboarding_data;
         completed = dbData && Object.keys(dbData).length > 0;
         
         if (dbData) {
-          console.log('📊 Status retrieved from Supabase database:', completed);
+          console.log('📊 Status retrieved from MongoDB database:', completed);
           // Cache the data for future requests
           console.log('💾 Caching status data for faster access...');
           onboardingCache.set(userId, dbData);
@@ -468,8 +473,8 @@ app.get('/api/onboarding/:userId/status', async (req, res) => {
           source = 'database';
         }
       } catch (error) {
-        console.log('❌ Supabase status check failed:', error);
-        useSupabase = false;
+        console.log('❌ MongoDB status check failed:', error.message);
+        useDB = false;
       }
     }
 
@@ -534,6 +539,240 @@ app.post('/api/questionnaire/answer', (req, res) => {
         fields: ["header", "navigation", "content", "sidebar", "footer"]
       }
     });
+  }
+});
+
+// =====================================================
+// PROJECT CRUD ENDPOINTS
+// =====================================================
+
+// In-memory projects storage (fallback)
+const projectsCache = new Map();
+
+// GET /api/projects - List user's projects
+app.get('/api/projects', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    let projects = [];
+
+    if (useDB) {
+      try {
+        projects = await mongoDB.getUserProjects(userId);
+      } catch (err) {
+        console.error('DB error fetching projects:', err.message);
+      }
+    }
+    
+    // Also include in-memory projects for this user
+    const memProjects = projectsCache.get(userId) || [];
+    const allProjects = [...projects, ...memProjects];
+
+    res.json(allProjects);
+  } catch (error) {
+    console.error('Error fetching projects:', error);
+    res.status(500).json({ error: 'Failed to fetch projects' });
+  }
+});
+
+// POST /api/projects - Create a new project
+app.post('/api/projects', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { name, description, type } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Project name is required' });
+    }
+
+    const projectData = {
+      user_id: userId,
+      name: name.trim(),
+      description: description || '',
+      type: type || 'wireframe',
+      status: 'draft',
+      is_active: true,
+    };
+
+    let project;
+    if (useDB) {
+      try {
+        project = await mongoDB.createProject(projectData);
+      } catch (err) {
+        console.error('DB error creating project:', err.message);
+      }
+    }
+
+    if (!project) {
+      // Fallback to in-memory
+      project = {
+        id: require('crypto').randomUUID(),
+        ...projectData,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const userProjects = projectsCache.get(userId) || [];
+      userProjects.push(project);
+      projectsCache.set(userId, userProjects);
+    }
+
+    res.status(201).json(project);
+  } catch (error) {
+    console.error('Error creating project:', error);
+    res.status(500).json({ error: 'Failed to create project' });
+  }
+});
+
+// GET /api/projects/:id - Get a single project
+app.get('/api/projects/:id', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const projectId = req.params.id;
+    let project = null;
+
+    if (useDB) {
+      try {
+        project = await mongoDB.getProjectById(projectId, userId);
+      } catch (err) {
+        console.error('DB error fetching project:', err.message);
+      }
+    }
+
+    if (!project) {
+      const userProjects = projectsCache.get(userId) || [];
+      project = userProjects.find(p => p.id === projectId);
+    }
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    res.json(project);
+  } catch (error) {
+    console.error('Error fetching project:', error);
+    res.status(500).json({ error: 'Failed to fetch project' });
+  }
+});
+
+// PUT /api/projects/:id - Update a project
+app.put('/api/projects/:id', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const projectId = req.params.id;
+    const updates = req.body;
+    let project = null;
+
+    if (useDB) {
+      try {
+        project = await mongoDB.updateProject(projectId, userId, updates);
+      } catch (err) {
+        console.error('DB error updating project:', err.message);
+      }
+    }
+
+    if (!project) {
+      const userProjects = projectsCache.get(userId) || [];
+      const idx = userProjects.findIndex(p => p.id === projectId);
+      if (idx !== -1) {
+        userProjects[idx] = { ...userProjects[idx], ...updates, updated_at: new Date().toISOString() };
+        project = userProjects[idx];
+      }
+    }
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    res.json(project);
+  } catch (error) {
+    console.error('Error updating project:', error);
+    res.status(500).json({ error: 'Failed to update project' });
+  }
+});
+
+// DELETE /api/projects/:id - Soft-delete a project
+app.delete('/api/projects/:id', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const projectId = req.params.id;
+    let deleted = false;
+
+    if (useDB) {
+      try {
+        const result = await mongoDB.deleteProject(projectId, userId);
+        deleted = !!result;
+      } catch (err) {
+        console.error('DB error deleting project:', err.message);
+      }
+    }
+
+    if (!deleted) {
+      const userProjects = projectsCache.get(userId) || [];
+      const idx = userProjects.findIndex(p => p.id === projectId);
+      if (idx !== -1) {
+        userProjects.splice(idx, 1);
+        deleted = true;
+      }
+    }
+
+    if (!deleted) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    res.json({ success: true, message: 'Project deleted' });
+  } catch (error) {
+    console.error('Error deleting project:', error);
+    res.status(500).json({ error: 'Failed to delete project' });
+  }
+});
+
+// GET /api/projects/:id/wireframes - Get wireframes for a project
+app.get('/api/projects/:id/wireframes', authenticateToken, async (req, res) => {
+  try {
+    const projectId = req.params.id;
+    let wireframes = [];
+
+    if (useDB) {
+      try {
+        wireframes = await mongoDB.getProjectWireframes(projectId);
+      } catch (err) {
+        console.error('DB error fetching wireframes:', err.message);
+      }
+    }
+
+    res.json(wireframes);
+  } catch (error) {
+    console.error('Error fetching wireframes:', error);
+    res.status(500).json({ error: 'Failed to fetch wireframes' });
+  }
+});
+
+// GET /api/user/stats - Get dashboard stats for current user
+app.get('/api/user/stats', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    let projects = [];
+
+    if (useDB) {
+      try {
+        projects = await mongoDB.getUserProjects(userId);
+      } catch (err) {
+        console.error('DB error fetching stats:', err.message);
+      }
+    }
+
+    const memProjects = projectsCache.get(userId) || [];
+    const allProjects = [...projects, ...memProjects];
+
+    const stats = {
+      totalProjects: allProjects.length,
+      inProgress: allProjects.filter(p => p.status === 'draft' || p.status === 'in_progress').length,
+      completed: allProjects.filter(p => p.status === 'completed').length,
+    };
+
+    res.json(stats);
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+    res.status(500).json({ error: 'Failed to fetch stats' });
   }
 });
 
@@ -1066,6 +1305,19 @@ Respond with ONLY the JSON, no explanations or markdown.`;
     console.log('Falling back to template-based generation');
     return generateWireframeFromPrompt(prompt);
   }
+}
+
+// Initialize Google Gemini AI client (optional, for wireframe modification)
+let genAI = null;
+try {
+  const { GoogleGenerativeAI } = require('@google/generative-ai');
+  const googleApiKey = process.env.GOOGLE_API_KEY?.trim();
+  if (googleApiKey) {
+    genAI = new GoogleGenerativeAI(googleApiKey);
+    console.log('\u2705 Gemini AI client initialized for wireframe modification');
+  }
+} catch {
+  console.log('\u26a0\ufe0f @google/generative-ai not installed, Gemini modification unavailable');
 }
 
 // AI-powered wireframe modification using Google Gemini
@@ -2157,14 +2409,14 @@ const server = app.listen(PORT, HOST, async (err) => {
     console.log(`🚀 Simple Backend Server Started`);
     console.log(`📍 Server listening on http://${HOST}:${PORT}`);
     
-    // Test Supabase connection on startup
-    await testSupabaseConnection();
+    // Connect to MongoDB on startup
+    await connectDatabase();
     
     console.log(`🔗 API endpoints:`);
     console.log(`   - POST http://localhost:${PORT}/api/auth/register`);
     console.log(`   - POST http://localhost:${PORT}/api/auth/login`);
     console.log(`   - GET  http://localhost:${PORT}/health`);
-    console.log(`💾 Storage: ${useSupabase ? 'Supabase Database' : 'In-Memory (Demo Mode)'}`);
+    console.log(`💾 Storage: ${useDB ? 'MongoDB Database' : 'In-Memory (Demo Mode)'}`);
   }
 });
 

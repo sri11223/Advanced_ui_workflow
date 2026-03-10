@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { createClient } = require('@supabase/supabase-js');
+const { MongoDBService } = require('./config/mongodb');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 
@@ -27,13 +27,32 @@ app.use(helmet({
 }));
 
 // CORS with enterprise configuration
-app.use(cors({
-  origin: [
-    'http://localhost:3000', 
-    'http://localhost:5173', 
+let corsOrigins;
+if (process.env.CORS_ORIGINS) {
+  try {
+    const parsed = JSON.parse(process.env.CORS_ORIGINS);
+    corsOrigins = Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    corsOrigins = process.env.CORS_ORIGINS.split(',').map(o => o.trim());
+  }
+} else {
+  corsOrigins = [
+    'http://localhost:3000',
+    'http://localhost:5173',
     'http://localhost:5174',
     'https://advanced-ui-workflow-frontend.vercel.app'
-  ],
+  ];
+}
+
+app.use(cors({
+  origin: corsOrigins,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
+app.options('*', cors({
+  origin: corsOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
@@ -106,49 +125,40 @@ app.use((req, res, next) => {
 // DATABASE CONFIGURATION
 // =====================================================
 
-// In-memory user storage (fallback for demo)
+// In-memory user storage (fallback)
 const users = new Map();
 
-// Supabase configuration
-const supabaseUrl = 'https://fbkddxynrmbxyiuhcssq.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZia2RkeHlucm1ieHlpdWhjc3NxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxNTE3OTQsImV4cCI6MjA3MjcyNzc5NH0.Yxgc4ld3uc1_QOvP966OE-Evtqd8uOTMDVVtM7kJzu0';
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-// Enterprise database health monitoring
-let useSupabase = true;
+// MongoDB configuration
+const mongoDB = new MongoDBService();
+let useDB = false;
 let dbHealthStatus = 'unknown';
 let lastHealthCheck = null;
 
-async function testSupabaseConnection() {
+async function connectDatabase() {
+  const mongoUri = process.env.MONGODB_URI || '';
+  if (!mongoUri) {
+    console.log('⚠️ [ENTERPRISE] No MONGODB_URI configured, using in-memory storage');
+    useDB = false;
+    dbHealthStatus = 'unconfigured';
+    lastHealthCheck = new Date().toISOString();
+    return;
+  }
   try {
-    console.log('🔍 [ENTERPRISE] Testing Supabase connection...');
-    console.log('📍 URL:', supabaseUrl);
-    console.log('🔑 Key configured:', !!supabaseKey);
-    
     const startTime = Date.now();
-    const { data, error } = await supabase.from('users').select('count').limit(1);
+    const connected = await mongoDB.connect(mongoUri);
     const responseTime = Date.now() - startTime;
-    
-    if (error) {
-      console.log('❌ [ENTERPRISE] Supabase connection failed:');
-      console.log('   Error:', error.message);
-      console.log('   Code:', error.code);
-      console.log('   Hint:', error.hint);
-      console.log('⚠️  [ENTERPRISE] Falling back to in-memory storage');
-      useSupabase = false;
-      dbHealthStatus = 'unhealthy';
+    useDB = connected;
+    dbHealthStatus = connected ? 'healthy' : 'unhealthy';
+    if (connected) {
+      console.log(`📊 [ENTERPRISE] MongoDB connect time: ${responseTime}ms`);
     } else {
-      console.log('✅ [ENTERPRISE] Supabase connection successful');
-      console.log(`📊 Response time: ${responseTime}ms`);
-      useSupabase = true;
-      dbHealthStatus = 'healthy';
+      console.log('⚠️ [ENTERPRISE] Falling back to in-memory storage');
     }
-    
     lastHealthCheck = new Date().toISOString();
   } catch (err) {
-    console.log('❌ [ENTERPRISE] Supabase connection error:', err.message);
-    console.log('⚠️  [ENTERPRISE] Falling back to in-memory storage');
-    useSupabase = false;
+    console.log('❌ [ENTERPRISE] MongoDB connection error:', err.message);
+    console.log('⚠️ [ENTERPRISE] Falling back to in-memory storage');
+    useDB = false;
     dbHealthStatus = 'unhealthy';
     lastHealthCheck = new Date().toISOString();
   }
@@ -184,7 +194,7 @@ app.get('/health/detailed', async (req, res) => {
     uptime: process.uptime(),
     database: {
       status: dbHealthStatus,
-      type: useSupabase ? 'supabase' : 'in-memory',
+      type: useDB ? 'mongodb' : 'in-memory',
       lastHealthCheck: lastHealthCheck
     },
     memory: {
@@ -208,8 +218,8 @@ app.get('/metrics', (req, res) => {
     uptime: process.uptime(),
     memory: process.memoryUsage(),
     storage: {
-      type: useSupabase ? 'supabase' : 'in-memory',
-      userCount: useSupabase ? 'N/A' : users.size
+      type: useDB ? 'mongodb' : 'in-memory',
+      userCount: useDB ? 'N/A' : users.size
     },
     requestId: req.id
   });
@@ -268,35 +278,31 @@ app.post('/api/auth/register', async (req, res) => {
     const userEmail = email.toLowerCase();
     let user;
 
-    if (useSupabase) {
-      console.log(`[${req.id}] Using Supabase database...`);
+    if (useDB) {
+      console.log(`[${req.id}] Using MongoDB database...`);
       
-      // Check if user already exists
-      const { data: existingUser, error: checkError } = await supabase
-        .from('users')
-        .select('id')
-        .eq('email', userEmail)
-        .single();
-
-      if (checkError && checkError.code !== 'PGRST116') {
-        console.error(`[${req.id}] Database error:`, checkError);
+      try {
+        const existingUser = await mongoDB.getUserByEmail(userEmail);
+        if (existingUser) {
+          console.log(`[${req.id}] User already exists`);
+          return res.status(409).json({
+            success: false,
+            error: {
+              message: 'User already exists with this email',
+              code: 'USER_EXISTS',
+              requestId: req.id
+            }
+          });
+        }
+      } catch (checkErr) {
+        console.error(`[${req.id}] Database error:`, checkErr.message);
         console.log(`[${req.id}] Falling back to in-memory storage`);
-        useSupabase = false;
+        useDB = false;
         dbHealthStatus = 'degraded';
-      } else if (existingUser) {
-        console.log(`[${req.id}] User already exists`);
-        return res.status(409).json({
-          success: false,
-          error: {
-            message: 'User already exists with this email',
-            code: 'USER_EXISTS',
-            requestId: req.id
-          }
-        });
       }
     }
 
-    if (!useSupabase) {
+    if (!useDB) {
       console.log(`[${req.id}] Using in-memory storage...`);
       
       if (users.has(userEmail)) {
@@ -326,24 +332,18 @@ app.post('/api/auth/register', async (req, res) => {
       onboarding_step: 0
     };
 
-    if (useSupabase) {
-      console.log(`[${req.id}] Creating user in Supabase...`);
-      const { data: supabaseUser, error: createError } = await supabase
-        .from('users')
-        .insert([userData])
-        .select()
-        .single();
-
-      if (createError) {
-        console.error(`[${req.id}] Supabase creation error:`, createError);
+    if (useDB) {
+      console.log(`[${req.id}] Creating user in MongoDB...`);
+      try {
+        user = await mongoDB.createUser(userData);
+      } catch (createErr) {
+        console.error(`[${req.id}] MongoDB creation error:`, createErr.message);
         console.log(`[${req.id}] Falling back to in-memory storage`);
-        useSupabase = false;
+        useDB = false;
         dbHealthStatus = 'degraded';
         userData.id = Date.now().toString();
         users.set(userEmail, userData);
         user = userData;
-      } else {
-        user = supabaseUser;
       }
     } else {
       console.log(`[${req.id}] Creating user in memory...`);
@@ -411,24 +411,18 @@ app.post('/api/auth/login', async (req, res) => {
     const userEmail = email.toLowerCase();
     let user;
 
-    if (useSupabase) {
-      console.log(`[${req.id}] Looking up user in Supabase...`);
-      const { data: supabaseUser, error: userError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('email', userEmail)
-        .single();
-
-      if (userError && userError.code !== 'PGRST116') {
-        console.log(`[${req.id}] Supabase error, falling back to memory`);
-        useSupabase = false;
+    if (useDB) {
+      console.log(`[${req.id}] Looking up user in MongoDB...`);
+      try {
+        user = await mongoDB.getUserByEmail(userEmail);
+      } catch (lookupErr) {
+        console.log(`[${req.id}] MongoDB error, falling back to memory`);
+        useDB = false;
         dbHealthStatus = 'degraded';
-      } else {
-        user = supabaseUser;
       }
     }
 
-    if (!useSupabase) {
+    if (!useDB) {
       console.log(`[${req.id}] Looking up user in memory...`);
       user = users.get(userEmail);
     }
@@ -542,8 +536,8 @@ const server = app.listen(PORT, HOST, async (err) => {
     console.log('📍 Server listening on http://' + HOST + ':' + PORT);
     console.log('🏢 Enterprise Features: Security Headers, Rate Limiting, Monitoring, Logging');
     
-    // Test database connection on startup
-    await testSupabaseConnection();
+    // Connect to database on startup
+    await connectDatabase();
     
     console.log('🔗 API Endpoints:');
     console.log('   - POST http://localhost:' + PORT + '/api/auth/register');
@@ -551,7 +545,7 @@ const server = app.listen(PORT, HOST, async (err) => {
     console.log('   - GET  http://localhost:' + PORT + '/health');
     console.log('   - GET  http://localhost:' + PORT + '/health/detailed');
     console.log('   - GET  http://localhost:' + PORT + '/metrics');
-    console.log('💾 Storage: ' + (useSupabase ? 'Supabase Database' : 'In-Memory (Demo Mode)'));
+    console.log('💾 Storage: ' + (useDB ? 'MongoDB Database' : 'In-Memory (Demo Mode)'));
     console.log('🛡️  Security: Helmet, CORS, Rate Limiting, Request ID Tracking');
     console.log('📊 Monitoring: Health Checks, Metrics, Structured Logging');
     console.log('✅ Simple Enterprise Server Ready!');

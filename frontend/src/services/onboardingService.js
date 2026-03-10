@@ -1,6 +1,6 @@
-import axios from 'axios';
+import { onboardingAPI } from './api';
 
-const API_BASE_URL = 'https://advanced-ui-workflow.onrender.com/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 
 class OnboardingService {
   /**

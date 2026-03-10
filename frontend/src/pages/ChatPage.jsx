@@ -1,6 +1,8 @@
 import axios from "axios";
 import { useState, useEffect } from "react";
 
+const API_URL = import.meta.env.VITE_WIREFRAME_API_URL || 'http://localhost:5000';
+
 export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
@@ -37,7 +39,7 @@ export default function ChatPage() {
       console.log("Starting new session with prompt:", prompt);
       try {
         const response = await axios.post(
-          "https://advanced-ui-workflow-1.onrender.com/api/questionnaire/start",
+          `${API_URL}/api/questionnaire/start`,
           { prompt: prompt }
         );
         console.log("Start response:", response.data);
@@ -83,7 +85,7 @@ export default function ChatPage() {
     // Handle answering questions
     try {
       const response = await axios.post(
-        `https://advanced-ui-workflow-1.onrender.com/api/questionnaire/answer`,
+        `${API_URL}/api/questionnaire/answer`,
         { sessionId: sessionId, answer: userAnswer }
       );
 
@@ -113,7 +115,7 @@ export default function ChatPage() {
           try {
             console.log("Calling Figma generate API with data:", response.data.wireframe.json);
             const figmaResponse = await axios.post(
-              "https://advanced-ui-workflow-1.onrender.com/figma/generate",
+              `${API_URL}/figma/generate`,
               response.data.wireframe.json // Send only the JSON object from wireframe
             );
 

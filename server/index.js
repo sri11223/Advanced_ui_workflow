@@ -14,29 +14,43 @@ console.log(
   "Environment variables loaded:",
   Object.keys(process.env).filter(
     (key) => key.includes("PINECONE") || key.includes("GROQ")
-  )
+  ).map(key => `${key}=${key.includes('KEY') ? '***' : process.env[key]}`)
 );
 
 // Import routers and utilities
 const ragRouter = require("./chatbot");
 const questionnaireRouter = require("./questionnaire");
+const { applyRateLimiters } = require("./utils/rate-limiter");
 
 // Initialize Express app
 const app = express();
+
+// CORS origins from env or defaults
+const corsOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',').map(o => o.trim())
+  : [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'https://advanced-ui-workflow-frontend.vercel.app'
+    ];
+
 app.use(cors({
-  origin: [
-    'http://localhost:3000', 
-    'http://localhost:5173', 
-    'http://localhost:5174',
-    'https://advanced-ui-workflow-frontend.vercel.app'
-  ],
+  origin: corsOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(bodyParser.json({ limit: "10mb" }));
 
+// Apply rate limiters
+applyRateLimiters(app);
+
 const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+// WebSocket clients for Figma plugin connection (declared early for route usage)
+let figmaClients = [];
+let latestWireframeContext = null;
 
 // Add route for wireframe generation using RAG system
 app.post("/generate-wireframe", async (req, res) => {
@@ -154,6 +168,17 @@ app.use("/api/questionnaire", questionnaireRouter);
 // Store conversation sessions for context with enhanced session management
 const conversationSessions = new Map();
 
+// Clean up stale sessions every 30 minutes (sessions older than 2 hours)
+const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, session] of conversationSessions) {
+    if (now - session.lastActivity.getTime() > SESSION_TTL_MS) {
+      conversationSessions.delete(id);
+    }
+  }
+}, 30 * 60 * 1000);
+
 // Enhanced session structure for intelligent conversations
 class WireframeSession {
   constructor(id) {
@@ -200,9 +225,11 @@ app.post("/api/wireframe/generate", async (req, res) => {
       return res.status(400).json({ error: "Prompt is required" });
     }
 
-    // Add realistic processing delay (2-4 seconds)
-    const processingDelay = Math.random() * 2000 + 2000;
-    await new Promise(resolve => setTimeout(resolve, processingDelay));
+    // Add realistic processing delay (2-4 seconds) only in development
+    if (process.env.NODE_ENV !== 'production') {
+      const processingDelay = Math.random() * 2000 + 2000;
+      await new Promise(resolve => setTimeout(resolve, processingDelay));
+    }
 
     const currentSessionId = sessionId || Date.now().toString();
     
@@ -590,80 +617,6 @@ function generateSuggestions(websiteType) {
   };
 
   return suggestionSets[websiteType] || suggestionSets.ecommerce;
-}
-
-// Handle answers to follow-up questions
-async function handleQuestionAnswer(prompt, session) {
-  const lowerPrompt = prompt.toLowerCase();
-  let updatedWireframe = JSON.parse(JSON.stringify(session.currentWireframe));
-
-  // Extract color preferences
-  const colorKeywords = ['blue', 'red', 'green', 'purple', 'orange', 'pink', 'black', 'white', 'gray', 'dark', 'light'];
-  const mentionedColors = colorKeywords.filter(color => lowerPrompt.includes(color));
-  
-  if (mentionedColors.length > 0) {
-    session.colorPreferences = mentionedColors;
-    // Apply color preferences to wireframe
-    const primaryColor = mentionedColors[0];
-    const colorMap = {
-      'blue': '#3b82f6', 'red': '#dc2626', 'green': '#10b981',
-      'purple': '#8b5cf6', 'orange': '#f97316', 'pink': '#ec4899',
-      'black': '#000000', 'white': '#ffffff', 'gray': '#6b7280',
-      'dark': '#1f2937', 'light': '#f9fafb'
-    };
-    
-    const targetColor = colorMap[primaryColor];
-    if (targetColor) {
-      // Apply to buttons and key elements
-      const applyColors = (components) => {
-        components.forEach(component => {
-          if (component.type === 'button') {
-            component.fill = targetColor;
-          }
-        });
-      };
-      
-      if (updatedWireframe.pages) {
-        updatedWireframe.pages.forEach(page => applyColors(page.components));
-      } else if (updatedWireframe.components) {
-        applyColors(updatedWireframe.components);
-      }
-    }
-  }
-
-  // Extract objectives and update content
-  if (lowerPrompt.includes('sell') || lowerPrompt.includes('product')) {
-    session.objectives = 'sales';
-    // Update text content to be more sales-focused
-  } else if (lowerPrompt.includes('blog') || lowerPrompt.includes('write')) {
-    session.objectives = 'content';
-    // Update text content to be more content-focused
-  }
-
-  return updatedWireframe;
-}
-
-// Generate modification suggestions based on recent changes
-function generateModificationSuggestions(prompt, wireframe) {
-  const suggestions = [];
-  const lowerPrompt = prompt.toLowerCase();
-
-  if (lowerPrompt.includes('color')) {
-    suggestions.push("Try changing the text color too", "Add a gradient background", "Adjust the button hover effects");
-  }
-  
-  if (lowerPrompt.includes('text')) {
-    suggestions.push("Change the font size", "Make the text bold", "Add more descriptive content");
-  }
-  
-  if (lowerPrompt.includes('add')) {
-    suggestions.push("Position the new element", "Change its color", "Add more similar elements");
-  }
-
-  // Always include some general suggestions
-  suggestions.push("Add more interactive elements", "Improve the layout spacing", "Try a different color scheme");
-
-  return suggestions.slice(0, 3); // Return max 3 suggestions
 }
 
 // Handle answers to follow-up questions
@@ -1128,10 +1081,6 @@ function detectWebsiteType(prompt) {
 }
 
 // ===== Figma API Integration =====
-// WebSocket clients for Figma plugin connection
-let figmaClients = [];
-// Store the latest wireframe JSON for context
-let latestWireframeContext = null;
 
 // REST API to send wireframe JSON to Figma plugin
 app.post("/figma/generate", (req, res) => {

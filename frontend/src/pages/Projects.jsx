@@ -10,7 +10,7 @@ import useAuthStore from '../store/authStore';
 import { BackgroundLines } from '../components/ui/background-lines';
 
 const Projects = () => {
-  const { user, logout } = useAuthStore();
+  const { user, token, logout } = useAuthStore();
   const navigate = useNavigate();
   
   const [projects, setProjects] = useState([]);
@@ -20,16 +20,19 @@ const Projects = () => {
   const [filterType, setFilterType] = useState('all');
   const [sortBy, setSortBy] = useState('updated');
 
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+
   // Fetch projects from API
   useEffect(() => {
-    fetchProjects();
-  }, []);
+    if (token) {
+      fetchProjects();
+    }
+  }, [token]);
 
   const fetchProjects = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      const response = await fetch('https://advanced-ui-workflow.onrender.com/api/projects', {
+      const response = await fetch(`${API_BASE_URL}/projects`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -40,55 +43,32 @@ const Projects = () => {
         const data = await response.json();
         setProjects(data);
       } else {
-        console.error('Failed to fetch projects');
-        // Fallback to mock data if API fails
-        setProjects(mockProjects);
+        console.error('Failed to fetch projects:', response.status);
+        setProjects([]);
       }
     } catch (error) {
       console.error('Error fetching projects:', error);
-      // Fallback to mock data
-      setProjects(mockProjects);
+      setProjects([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // Mock data fallback
-  const mockProjects = [
-    {
-      id: 1,
-      name: "E-commerce Mobile App",
-      description: "Modern shopping app with AI recommendations",
-      project_type: "mobile",
-      created_at: "2024-01-15T10:30:00Z",
-      updated_at: "2024-01-20T14:45:00Z",
-      is_active: true,
-      wireframes_count: 12,
-      collaborators: 3
-    },
-    {
-      id: 2,
-      name: "SaaS Dashboard",
-      description: "Analytics dashboard for business intelligence",
-      project_type: "web",
-      created_at: "2024-01-10T09:15:00Z",
-      updated_at: "2024-01-18T16:20:00Z",
-      is_active: true,
-      wireframes_count: 8,
-      collaborators: 2
-    },
-    {
-      id: 3,
-      name: "Healthcare Portal",
-      description: "Patient management system interface",
-      project_type: "web",
-      created_at: "2024-01-05T11:00:00Z",
-      updated_at: "2024-01-15T13:30:00Z",
-      is_active: false,
-      wireframes_count: 15,
-      collaborators: 5
+  const handleDeleteProject = async (e, projectId) => {
+    e.stopPropagation();
+    if (!confirm('Are you sure you want to delete this project?')) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/projects/${projectId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (response.ok) {
+        setProjects(prev => prev.filter(p => p.id !== projectId));
+      }
+    } catch (error) {
+      console.error('Error deleting project:', error);
     }
-  ];
+  };
 
   const filteredProjects = projects.filter(project => {
     const matchesSearch = project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -129,8 +109,7 @@ const Projects = () => {
   const handleProjectClick = async (project) => {
     try {
       // Fetch wireframes for this project
-      const token = localStorage.getItem('token');
-      const response = await fetch(`https://advanced-ui-workflow.onrender.com/api/projects/${project.id}/wireframes`, {
+      const response = await fetch(`${API_BASE_URL}/projects/${project.id}/wireframes`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -141,75 +120,11 @@ const Projects = () => {
       if (response.ok) {
         wireframeData = await response.json();
       } else {
-        // Create mock wireframe data for demo
-        wireframeData = [{
-          id: 1,
-          name: `${project.name} Wireframe`,
-          pages: [{
-            id: 1,
-            name: 'Main Page',
-            components: [
-              {
-                id: Date.now(),
-                type: 'navigation',
-                x: 50,
-                y: 20,
-                width: 400,
-                height: 60,
-                text: 'Home | About | Services | Contact',
-                fill: '#1f2937',
-                textColor: '#ffffff',
-                fontSize: 14,
-                fontFamily: 'Arial',
-                fontWeight: 'medium',
-                borderColor: '#d1d5db',
-                borderWidth: 0,
-                borderRadius: 0,
-                opacity: 1
-              },
-              {
-                id: Date.now() + 1,
-                type: 'text',
-                x: 50,
-                y: 120,
-                width: 300,
-                height: 40,
-                text: `Welcome to ${project.name}`,
-                fill: 'transparent',
-                textColor: '#374151',
-                fontSize: 24,
-                fontFamily: 'Arial',
-                fontWeight: 'bold',
-                borderColor: '#d1d5db',
-                borderWidth: 0,
-                borderRadius: 0,
-                opacity: 1
-              },
-              {
-                id: Date.now() + 2,
-                type: 'button',
-                x: 50,
-                y: 200,
-                width: 120,
-                height: 40,
-                text: 'Get Started',
-                fill: '#3b82f6',
-                textColor: '#ffffff',
-                fontSize: 14,
-                fontFamily: 'Arial',
-                fontWeight: 'bold',
-                borderColor: '#d1d5db',
-                borderWidth: 0,
-                borderRadius: 8,
-                opacity: 1
-              }
-            ]
-          }]
-        }];
+        wireframeData = [];
       }
 
       // Navigate to workspace with project data
-      navigate(`/workspace/${project.name.toLowerCase().replace(/\s+/g, '-')}`, {
+      navigate(`/workspace/${project.id}`, {
         state: {
           projectId: project.id,
           projectData: project,
@@ -219,20 +134,11 @@ const Projects = () => {
       });
     } catch (error) {
       console.error('Error loading project:', error);
-      // Navigate with mock data
-      navigate(`/workspace/${project.name.toLowerCase().replace(/\s+/g, '-')}`, {
+      navigate(`/workspace/${project.id}`, {
         state: {
           projectId: project.id,
           projectData: project,
-          wireframeData: [{
-            id: 1,
-            name: `${project.name} Wireframe`,
-            pages: [{
-              id: 1,
-              name: 'Main Page',
-              components: []
-            }]
-          }],
+          wireframeData: [],
           quickLoad: true
         }
       });

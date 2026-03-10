@@ -374,7 +374,7 @@ class EnterpriseApp {
       
       return {
         status: 'healthy',
-        type: 'supabase',
+        type: 'mongodb',
         connected: true,
         responseTime: '<50ms'
       };

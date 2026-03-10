@@ -4,12 +4,14 @@
   "description": "AI-Powered UX & Wireframe Flow Generator for Techolution Hackathon 2025",
   "main": "index.js",
   "scripts": {
-    "dev": "concurrently \"npm run frontend:dev\" \"npm run backend:dev\"",
+    "dev": "concurrently \"npm run frontend:dev\" \"npm run server:dev\" \"npm run backend:dev\"",
     "frontend:dev": "cd frontend && npm run dev",
-    "backend:dev": "cd backend && python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "server:dev": "cd server && npm run dev",
+    "backend:dev": "cd backend-js && npm run dev",
     "frontend:install": "cd frontend && npm install",
-    "backend:install": "cd backend && pip install -r requirements.txt",
-    "install:all": "npm run frontend:install && npm run backend:install",
+    "server:install": "cd server && npm install",
+    "backend:install": "cd backend-js && npm install",
+    "install:all": "npm run frontend:install && npm run server:install && npm run backend:install",
     "build": "cd frontend && npm run build",
     "start": "cd frontend && npm start"
   },
@@ -28,6 +30,7 @@
   },
   "workspaces": [
     "frontend",
-    "backend"
+    "backend-js",
+    "server"
   ]
 }

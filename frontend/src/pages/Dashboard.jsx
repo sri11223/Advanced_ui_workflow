@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 import {
@@ -36,74 +36,57 @@ import useAuthStore from "../store/authStore";
 export default function Dashboard() {
   const [viewMode, setViewMode] = useState("grid");
   const [searchQuery, setSearchQuery] = useState("");
-  const { user, logout } = useAuthStore();
+  const { user, token, logout } = useAuthStore();
   const navigate = useNavigate();
 
-  const projects = [
-    {
-      id: 1,
-      name: "E-commerce Mobile App",
-      description: "Modern shopping app with AI recommendations",
-      lastModified: "2 hours ago",
-      thumbnail:
-        "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=300&h=200&fit=crop",
-      status: "In Progress",
-      collaborators: 3,
-    },
-    {
-      id: 2,
-      name: "SaaS Dashboard",
-      description: "Analytics dashboard for B2B platform",
-      lastModified: "1 day ago",
-      thumbnail:
-        "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=300&h=200&fit=crop",
-      status: "Review",
-      collaborators: 5,
-    },
-    {
-      id: 3,
-      name: "Banking App Redesign",
-      description: "Complete UX overhaul for mobile banking",
-      lastModified: "3 days ago",
-      thumbnail:
-        "https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=300&h=200&fit=crop",
-      status: "Completed",
-      collaborators: 2,
-    },
-    {
-      id: 4,
-      name: "Healthcare Portal",
-      description: "Patient management system interface",
-      lastModified: "1 week ago",
-      thumbnail:
-        "https://images.unsplash.com/photo-1576091160399-112ba8d25d1f?w=300&h=200&fit=crop",
-      status: "Planning",
-      collaborators: 4,
-    },
-  ];
+  const [projects, setProjects] = useState([]);
+  const [stats, setStats] = useState({ totalProjects: 0, inProgress: 0, completed: 0 });
+  const [loading, setLoading] = useState(true);
 
-  const recentActivity = [
-    {
-      action: "Created wireframe",
-      project: "E-commerce Mobile App",
-      time: "2 hours ago",
-    },
-    {
-      action: "Updated components",
-      project: "SaaS Dashboard",
-      time: "5 hours ago",
-    },
-    {
-      action: "Shared prototype",
-      project: "Banking App Redesign",
-      time: "1 day ago",
-    },
-    {
-      action: "Added comments",
-      project: "Healthcare Portal",
-      time: "2 days ago",
-    },
-  ];
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+
+  useEffect(() => {
+    if (token) {
+      fetchDashboardData();
+    }
+  }, [token]);
+
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      };
+
+      const [projectsRes, statsRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/projects`, { headers }),
+        fetch(`${API_BASE_URL}/user/stats`, { headers }),
+      ]);
+
+      if (projectsRes.ok) {
+        const projectsData = await projectsRes.json();
+        setProjects(projectsData);
+      }
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setStats(statsData);
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Build recent activity from actual projects
+  const recentActivity = projects
+    .slice(0, 4)
+    .map((p) => ({
+      action: p.status === 'completed' ? 'Completed' : 'Updated',
+      project: p.name,
+      time: new Date(p.updated_at || p.created_at).toLocaleDateString(),
+    }));
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -257,25 +240,25 @@ export default function Dashboard() {
             {[
               {
                 label: "Total Projects",
-                value: "12",
+                value: stats.totalProjects.toString(),
                 icon: Folder,
                 color: "from-blue-500 to-cyan-500",
               },
               {
                 label: "In Progress",
-                value: "4",
+                value: stats.inProgress.toString(),
                 icon: Clock,
                 color: "from-yellow-500 to-orange-500",
               },
               {
                 label: "Completed",
-                value: "8",
+                value: stats.completed.toString(),
                 icon: Star,
                 color: "from-green-500 to-emerald-500",
               },
               {
-                label: "Team Members",
-                value: "6",
+                label: "Wireframes",
+                value: projects.length > 0 ? projects.length.toString() : "0",
                 icon: User,
                 color: "from-purple-500 to-pink-500",
               },
@@ -377,22 +360,40 @@ export default function Dashboard() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.4 }}
                 >
-                  <HoverEffect
-                    items={projects.map((project) => ({
-                      title: project.name,
-                      description: project.description,
-                      link: `/workspace/${project.name.toLowerCase().replace(/\s+/g, '-')}`,
-                      status: project.status,
-                      collaborators: project.collaborators,
-                      lastModified: project.lastModified,
-                      thumbnail: project.thumbnail,
-                    }))}
-                    className={
-                      viewMode === "grid"
-                        ? "grid-cols-1 md:grid-cols-2"
-                        : "grid-cols-1"
-                    }
-                  />
+                  {loading ? (
+                    <div className="text-center py-12">
+                      <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                      <p className="text-white/60">Loading projects...</p>
+                    </div>
+                  ) : projects.length === 0 ? (
+                    <div className="text-center py-16 bg-white/5 rounded-2xl border border-white/10">
+                      <Folder className="w-16 h-16 text-white/20 mx-auto mb-4" />
+                      <h3 className="text-xl font-semibold text-white mb-2">No projects yet</h3>
+                      <p className="text-white/60 mb-6">Create your first project to get started with AI wireframe generation</p>
+                      <Button 
+                        onClick={() => navigate('/workspace/new-project')}
+                        className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Create First Project
+                      </Button>
+                    </div>
+                  ) : (
+                    <HoverEffect
+                      items={projects.map((project) => ({
+                        title: project.name,
+                        description: project.description || '',
+                        link: `/workspace/${project.id}`,
+                        status: project.status || 'draft',
+                        lastModified: project.updated_at ? new Date(project.updated_at).toLocaleDateString() : '',
+                      }))}
+                      className={
+                        viewMode === "grid"
+                          ? "grid-cols-1 md:grid-cols-2"
+                          : "grid-cols-1"
+                      }
+                    />
+                  )}
                 </motion.div>
               </motion.div>
             </div>
@@ -413,7 +414,10 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      {recentActivity.map((activity, index) => (
+                      {recentActivity.length === 0 ? (
+                        <p className="text-white/40 text-sm text-center py-4">No recent activity yet</p>
+                      ) : (
+                        recentActivity.map((activity, index) => (
                         <div key={index} className="flex items-start space-x-3">
                           <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
                           <div className="flex-1 min-w-0">
@@ -431,7 +435,8 @@ export default function Dashboard() {
                             </p>
                           </div>
                         </div>
-                      ))}
+                      ))
+                      )}
                     </div>
                   </CardContent>
                 </Card>
