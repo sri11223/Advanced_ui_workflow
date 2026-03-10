@@ -1,10 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
-import { Stage, Layer, Rect, Text, Group } from 'react-konva';
+import { Stage, Layer, Rect, Text, Group, Transformer } from 'react-konva';
 import Konva from 'konva';
+import { jsPDF } from 'jspdf';
 import { 
-  ArrowLeft, Download, Undo, Redo, Trash2, Plus, Monitor, Tablet, 
-  Smartphone, Zap, Layers, Send, Loader, Sparkles, Lightbulb
+  ArrowLeft, Undo, Redo, Trash2, Plus, Monitor, Tablet, 
+  Smartphone, Zap, Layers, Send, Loader, Sparkles, Lightbulb,
+  Copy, ClipboardPaste, AlignCenterHorizontal, AlignCenterVertical,
+  FileJson, Image, FileText, Lock, Unlock, Eye, EyeOff, Move
 } from 'lucide-react';
 
 const WorkspaceCanvas = () => {
@@ -28,13 +31,25 @@ const WorkspaceCanvas = () => {
   const [viewMode, setViewMode] = useState('desktop');
   const [deviceTheme, setDeviceTheme] = useState('web');
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [canvasHistory, setCanvasHistory] = useState([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
   const [performance, setPerformance] = useState({ fps: 60, components: 0 });
   const [quickLoading, setQuickLoading] = useState(false);
   
+  // Multi-select and clipboard
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [clipboard, setClipboard] = useState([]);
+  const [lockedIds, setLockedIds] = useState(new Set());
+  const [hiddenIds, setHiddenIds] = useState(new Set());
+  const [snapToGrid, setSnapToGrid] = useState(true);
+  const gridSize = 10;
+  
   const stageRef = useRef(null);
   const layerRef = useRef(null);
+  const transformerRef = useRef(null);
+  
+  // History using refs to avoid stale closure issues
+  const historyRef = useRef([]);
+  const historyIndexRef = useRef(-1);
+  const [canUndoRedo, setCanUndoRedo] = useState({ undo: false, redo: false });
 
   // Sample prompts for chat
   const samplePrompts = [
@@ -90,8 +105,10 @@ const WorkspaceCanvas = () => {
 
   // Responsive canvas sizing
   const getCanvasSize = () => {
-    const baseWidth = window.innerWidth * (isCollapsed ? 0.85 : 0.67);
-    const baseHeight = window.innerHeight - 160;
+    const chatWidth = isCollapsed ? 0 : 320;
+    const propsWidth = (showProperties && selectedObject) ? 320 : 0;
+    const baseWidth = window.innerWidth - chatWidth - propsWidth - 48;
+    const baseHeight = window.innerHeight - 240;
     
     switch (viewMode) {
       case 'mobile':
@@ -99,7 +116,7 @@ const WorkspaceCanvas = () => {
       case 'tablet':
         return { width: Math.min(baseWidth, 768), height: Math.min(baseHeight, 1024) };
       default:
-        return { width: baseWidth, height: baseHeight };
+        return { width: Math.max(baseWidth, 400), height: Math.max(baseHeight, 400) };
     }
   };
 
@@ -113,7 +130,7 @@ const WorkspaceCanvas = () => {
     return styles[deviceTheme] || styles.web;
   };
 
-  // Chat message handler
+  // Chat message handler with full context
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
 
@@ -128,17 +145,25 @@ const WorkspaceCanvas = () => {
     setIsLoading(true);
 
     try {
+      // Build conversation history for context
+      const conversationHistory = messages
+        .filter(m => m.type === 'user' || m.type === 'assistant')
+        .slice(-10)  // Last 10 messages for context
+        .map(m => ({ role: m.type === 'user' ? 'user' : 'assistant', content: m.content }));
+
       const response = await fetch(`${import.meta.env.VITE_WIREFRAME_API_URL || 'http://localhost:5000'}/api/wireframe/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: userMessage.content,
           sessionId: sessionId,
+          conversationHistory,
           existingWireframe: wireframeData ? {
             components: wireframeComponents,
             pages: wireframeData.pages,
             websiteType: wireframeData.websiteType || wireframeData.appType,
-            currentPageId: currentPageId
+            currentPageId: currentPageId,
+            componentCount: wireframeComponents.length,
           } : null
         }),
       });
@@ -339,35 +364,115 @@ const WorkspaceCanvas = () => {
     saveCanvasState();
   };
 
-  const saveCanvasState = () => {
-    const newHistory = canvasHistory.slice(0, historyIndex + 1);
-    newHistory.push([...wireframeComponents]);
+  const saveCanvasState = useCallback(() => {
+    const snapshot = wireframeComponents.map(c => ({ ...c }));
+    const hist = historyRef.current;
+    const idx = historyIndexRef.current;
+    // Trim forward history
+    historyRef.current = hist.slice(0, idx + 1);
+    historyRef.current.push(snapshot);
+    // Max 50 history entries
+    if (historyRef.current.length > 50) historyRef.current.shift();
+    historyIndexRef.current = historyRef.current.length - 1;
+    setCanUndoRedo({
+      undo: historyIndexRef.current > 0,
+      redo: false,
+    });
+  }, [wireframeComponents]);
+
+  const undo = useCallback(() => {
+    if (historyIndexRef.current <= 0) return;
+    historyIndexRef.current -= 1;
+    const snapshot = historyRef.current[historyIndexRef.current];
+    setWireframeComponents(snapshot.map(c => ({ ...c })));
+    setSelectedIds(new Set());
+    setSelectedObject(null);
+    setShowProperties(false);
+    setCanUndoRedo({
+      undo: historyIndexRef.current > 0,
+      redo: historyIndexRef.current < historyRef.current.length - 1,
+    });
+  }, []);
+
+  const redo = useCallback(() => {
+    if (historyIndexRef.current >= historyRef.current.length - 1) return;
+    historyIndexRef.current += 1;
+    const snapshot = historyRef.current[historyIndexRef.current];
+    setWireframeComponents(snapshot.map(c => ({ ...c })));
+    setSelectedIds(new Set());
+    setSelectedObject(null);
+    setShowProperties(false);
+    setCanUndoRedo({
+      undo: historyIndexRef.current > 0,
+      redo: historyIndexRef.current < historyRef.current.length - 1,
+    });
+  }, []);
+
+  // Snap value to grid
+  const snapValue = (val) => snapToGrid ? Math.round(val / gridSize) * gridSize : val;
+
+  // Copy selected components
+  const copySelected = useCallback(() => {
+    const ids = selectedIds.size > 0 ? selectedIds : (selectedObject ? new Set([selectedObject.id]) : new Set());
+    const copied = wireframeComponents.filter(c => ids.has(c.id)).map(c => ({ ...c }));
+    if (copied.length > 0) setClipboard(copied);
+  }, [selectedIds, selectedObject, wireframeComponents]);
+
+  // Paste from clipboard
+  const pasteClipboard = useCallback(() => {
+    if (clipboard.length === 0) return;
+    const offset = 30;
+    const newComps = clipboard.map(c => ({
+      ...c,
+      id: Date.now() + Math.random(),
+      x: c.x + offset,
+      y: c.y + offset,
+    }));
+    setWireframeComponents(prev => [...prev, ...newComps]);
+    const newIds = new Set(newComps.map(c => c.id));
+    setSelectedIds(newIds);
+    setSelectedObject(newComps[newComps.length - 1]);
+    setTimeout(() => saveCanvasState(), 0);
+  }, [clipboard, saveCanvasState]);
+
+  // Align selected components
+  const alignSelected = useCallback((direction) => {
+    const ids = selectedIds.size > 0 ? selectedIds : (selectedObject ? new Set([selectedObject.id]) : new Set());
+    if (ids.size < 2) return;
+    const selected = wireframeComponents.filter(c => ids.has(c.id));
     
-    if (newHistory.length > 50) {
-      newHistory.shift();
+    let updateFn;
+    if (direction === 'horizontal') {
+      const centerY = selected.reduce((sum, c) => sum + c.y + (c.height || 40) / 2, 0) / selected.length;
+      updateFn = (c) => ids.has(c.id) ? { ...c, y: centerY - (c.height || 40) / 2 } : c;
+    } else if (direction === 'vertical') {
+      const centerX = selected.reduce((sum, c) => sum + c.x + (c.width || 200) / 2, 0) / selected.length;
+      updateFn = (c) => ids.has(c.id) ? { ...c, x: centerX - (c.width || 200) / 2 } : c;
     } else {
-      setHistoryIndex(prev => prev + 1);
+      return;
     }
-    
-    setCanvasHistory(newHistory);
+    setWireframeComponents(prev => prev.map(updateFn));
+    setTimeout(() => saveCanvasState(), 0);
+  }, [selectedIds, selectedObject, wireframeComponents, saveCanvasState]);
+
+  // Toggle lock/visibility
+  const toggleLock = (id) => {
+    setLockedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   };
 
-  const undo = () => {
-    if (historyIndex <= 0) return;
-    
-    const prevState = canvasHistory[historyIndex - 1];
-    setWireframeComponents(prevState);
-    setHistoryIndex(prev => prev - 1);
+  const toggleVisibility = (id) => {
+    setHiddenIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   };
 
-  const redo = () => {
-    if (historyIndex >= canvasHistory.length - 1) return;
-    
-    const nextState = canvasHistory[historyIndex + 1];
-    setWireframeComponents(nextState);
-    setHistoryIndex(prev => prev + 1);
-  };
-
+  // Export functions
   const exportAsPNG = () => {
     if (!stageRef.current) return;
     
@@ -388,6 +493,7 @@ const WorkspaceCanvas = () => {
       components: wireframeComponents,
       wireframeData,
       viewMode,
+      pages: wireframeData?.pages,
       timestamp: new Date().toISOString()
     }, null, 2);
     
@@ -399,11 +505,42 @@ const WorkspaceCanvas = () => {
     URL.revokeObjectURL(link.href);
   };
 
+  const exportAsPDF = () => {
+    if (!stageRef.current) return;
+    const dataURL = stageRef.current.toDataURL({ mimeType: 'image/png', quality: 1, pixelRatio: 2 });
+    const canvas = getCanvasSize();
+    const isLandscape = canvas.width > canvas.height;
+    const pdf = new jsPDF({
+      orientation: isLandscape ? 'landscape' : 'portrait',
+      unit: 'px',
+      format: [canvas.width, canvas.height],
+    });
+    pdf.addImage(dataURL, 'PNG', 0, 0, canvas.width, canvas.height);
+    pdf.save(`wireframe-${projectName || 'untitled'}.pdf`);
+  };
+
+  // Select all
+  const selectAll = useCallback(() => {
+    const allIds = new Set(wireframeComponents.filter(c => !hiddenIds.has(c.id) && !lockedIds.has(c.id)).map(c => c.id));
+    setSelectedIds(allIds);
+  }, [wireframeComponents, hiddenIds, lockedIds]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Delete' && selectedObject) {
-        deleteSelectedObject();
+      // Ignore shortcuts when typing in input fields
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedIds.size > 0) {
+          setWireframeComponents(prev => prev.filter(c => !selectedIds.has(c.id)));
+          setSelectedIds(new Set());
+          setSelectedObject(null);
+          setShowProperties(false);
+          setTimeout(() => saveCanvasState(), 0);
+        } else if (selectedObject) {
+          deleteSelectedObject();
+        }
       }
       if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
@@ -413,33 +550,80 @@ const WorkspaceCanvas = () => {
         e.preventDefault();
         redo();
       }
+      if (e.ctrlKey && e.key === 'c') {
+        e.preventDefault();
+        copySelected();
+      }
+      if (e.ctrlKey && e.key === 'v') {
+        e.preventDefault();
+        pasteClipboard();
+      }
+      if (e.ctrlKey && e.key === 'a') {
+        e.preventDefault();
+        selectAll();
+      }
+      if (e.ctrlKey && e.key === 'd') {
+        e.preventDefault();
+        // Duplicate selected
+        copySelected();
+        setTimeout(() => pasteClipboard(), 50);
+      }
       if (e.key === 'Escape') {
         setSelectedObject(null);
+        setSelectedIds(new Set());
         setShowProperties(false);
       }
-      if (e.key === '1') setViewMode('desktop');
-      if (e.key === '2') setViewMode('tablet');
-      if (e.key === '3') setViewMode('mobile');
+      if (e.key === '1' && !e.ctrlKey) setViewMode('desktop');
+      if (e.key === '2' && !e.ctrlKey) setViewMode('tablet');
+      if (e.key === '3' && !e.ctrlKey) setViewMode('mobile');
       if (e.ctrlKey && e.key === 'h') {
         e.preventDefault();
         setIsCollapsed(!isCollapsed);
+      }
+      // Arrow key nudge
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && (selectedObject || selectedIds.size > 0)) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0;
+        const dy = e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0;
+        const ids = selectedIds.size > 0 ? selectedIds : new Set([selectedObject?.id]);
+        setWireframeComponents(prev => prev.map(c => 
+          ids.has(c.id) ? { ...c, x: c.x + dx, y: c.y + dy } : c
+        ));
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectedObject, isCollapsed, historyIndex, canvasHistory]);
+  }, [selectedObject, selectedIds, isCollapsed, undo, redo, copySelected, pasteClipboard, selectAll, saveCanvasState]);
 
-  // Konva component renderer
+  // Konva component renderer with resize support
   const KonvaComponent = ({ component, isSelected, onSelect }) => {
-    const handleClick = () => {
+    const shapeRef = useRef(null);
+    const isLocked = lockedIds.has(component.id);
+    const isHidden = hiddenIds.has(component.id);
+
+    if (isHidden) return null;
+
+    const handleClick = (e) => {
+      if (isLocked) return;
+      // Multi-select with shift
+      if (e.evt.shiftKey) {
+        setSelectedIds(prev => {
+          const next = new Set(prev);
+          next.has(component.id) ? next.delete(component.id) : next.add(component.id);
+          return next;
+        });
+      } else {
+        setSelectedIds(new Set([component.id]));
+      }
       onSelect(component);
       setShowProperties(true);
     };
 
     const handleDragEnd = (e) => {
-      const newX = e.target.x();
-      const newY = e.target.y();
+      const newX = snapValue(e.target.x());
+      const newY = snapValue(e.target.y());
       
       setWireframeComponents(prev => 
         prev.map(comp => 
@@ -456,36 +640,82 @@ const WorkspaceCanvas = () => {
       saveCanvasState();
     };
 
-    if (component.type === 'text') {
+    const handleTransformEnd = () => {
+      const node = shapeRef.current;
+      if (!node) return;
+      
+      const scaleX = node.scaleX();
+      const scaleY = node.scaleY();
+      
+      // Reset scale and compute new width/height
+      node.scaleX(1);
+      node.scaleY(1);
+      
+      const newWidth = Math.max(20, node.width() * scaleX);
+      const newHeight = Math.max(20, node.height() * scaleY);
+      const newX = snapValue(node.x());
+      const newY = snapValue(node.y());
+      const newRotation = node.rotation();
+      
+      setWireframeComponents(prev =>
+        prev.map(comp =>
+          comp.id === component.id
+            ? { ...comp, x: newX, y: newY, width: newWidth, height: newHeight, rotation: newRotation }
+            : comp
+        )
+      );
+      
+      if (selectedObject?.id === component.id) {
+        setSelectedObject(prev => ({ ...prev, x: newX, y: newY, width: newWidth, height: newHeight, rotation: newRotation }));
+      }
+      
+      saveCanvasState();
+    };
+
+    const groupProps = {
+      ref: shapeRef,
+      x: component.x,
+      y: component.y,
+      rotation: component.rotation || 0,
+      draggable: !isLocked,
+      onClick: handleClick,
+      onTap: handleClick,
+      onDragEnd: handleDragEnd,
+      onTransformEnd: handleTransformEnd,
+      name: `component-${component.id}`,
+    };
+
+    if (component.type === 'text' && !component.fill) {
       return (
-        <Text
-          key={component.id}
-          x={component.x}
-          y={component.y}
-          text={component.text || 'Text'}
-          fontSize={component.fontSize || 16}
-          fontFamily={component.fontFamily || 'Arial'}
-          fontStyle={component.fontWeight || 'normal'}
-          fill={component.textColor || '#374151'}
-          opacity={component.opacity || 1}
-          draggable
-          onClick={handleClick}
-          onDragEnd={handleDragEnd}
-          stroke={isSelected ? '#3b82f6' : 'transparent'}
-          strokeWidth={2}
-        />
+        <Group {...groupProps} width={component.width || 150} height={component.height || 40}>
+          <Text
+            width={component.width || 150}
+            height={component.height || 40}
+            text={component.text || 'Text'}
+            fontSize={component.fontSize || 16}
+            fontFamily={component.fontFamily || 'Arial'}
+            fontStyle={component.fontWeight || 'normal'}
+            fill={component.textColor || '#374151'}
+            align={component.textAlign || 'left'}
+            verticalAlign="middle"
+            opacity={component.opacity || 1}
+          />
+          {isSelected && (
+            <Rect
+              width={component.width || 150}
+              height={component.height || 40}
+              stroke="#3b82f6"
+              strokeWidth={1}
+              dash={[4, 4]}
+              fill="transparent"
+            />
+          )}
+        </Group>
       );
     }
 
     return (
-      <Group
-        key={component.id}
-        x={component.x}
-        y={component.y}
-        draggable
-        onClick={handleClick}
-        onDragEnd={handleDragEnd}
-      >
+      <Group {...groupProps} width={component.width || 200} height={component.height || 40}>
         <Rect
           width={component.width || 200}
           height={component.height || 40}
@@ -494,19 +724,48 @@ const WorkspaceCanvas = () => {
           strokeWidth={isSelected ? 2 : (component.borderWidth || 1)}
           cornerRadius={component.borderRadius || 4}
           opacity={component.opacity || 1}
+          shadowColor={component.shadow ? (component.shadowColor || '#000000') : undefined}
+          shadowBlur={component.shadow ? (component.shadowBlur || 4) : 0}
+          shadowOffsetX={component.shadow ? (component.shadowOffset?.x || 2) : 0}
+          shadowOffsetY={component.shadow ? (component.shadowOffset?.y || 2) : 0}
+          shadowOpacity={component.shadow ? 0.3 : 0}
         />
         <Text
           x={8}
-          y={(component.height || 40) / 2 - 7}
+          y={0}
           text={component.text || 'Component'}
           fontSize={component.fontSize || 14}
           fontFamily={component.fontFamily || 'Arial'}
           fontStyle={component.fontWeight || 'normal'}
           fill={component.textColor || '#374151'}
+          width={(component.width || 200) - 16}
+          height={component.height || 40}
+          align={component.textAlign || (component.type === 'button' ? 'center' : 'left')}
+          verticalAlign="middle"
+          wrap="word"
+          ellipsis
         />
       </Group>
     );
   };
+
+  // Update Transformer when selection changes
+  useEffect(() => {
+    if (!transformerRef.current || !layerRef.current) return;
+    const tr = transformerRef.current;
+    const layer = layerRef.current;
+    
+    const allIds = selectedIds.size > 0 ? selectedIds : (selectedObject ? new Set([selectedObject.id]) : new Set());
+    
+    const nodes = [];
+    allIds.forEach(id => {
+      const node = layer.findOne(`.component-${id}`);
+      if (node) nodes.push(node);
+    });
+    
+    tr.nodes(nodes);
+    tr.getLayer()?.batchDraw();
+  }, [selectedIds, selectedObject, wireframeComponents]);
 
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col">
@@ -572,19 +831,62 @@ const WorkspaceCanvas = () => {
             
             <button
               onClick={undo}
-              disabled={historyIndex <= 0}
-              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
+              disabled={!canUndoRedo.undo}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-30"
               title="Undo (Ctrl+Z)"
             >
               <Undo className="w-5 h-5" />
             </button>
             <button
               onClick={redo}
-              disabled={historyIndex >= canvasHistory.length - 1}
-              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
+              disabled={!canUndoRedo.redo}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-30"
               title="Redo (Ctrl+Y)"
             >
               <Redo className="w-5 h-5" />
+            </button>
+
+            <div className="h-6 w-px bg-gray-600"></div>
+            
+            <button
+              onClick={copySelected}
+              disabled={!selectedObject && selectedIds.size === 0}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-30"
+              title="Copy (Ctrl+C)"
+            >
+              <Copy className="w-4 h-4" />
+            </button>
+            <button
+              onClick={pasteClipboard}
+              disabled={clipboard.length === 0}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-30"
+              title="Paste (Ctrl+V)"
+            >
+              <ClipboardPaste className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => alignSelected('horizontal')}
+              disabled={selectedIds.size < 2}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-30"
+              title="Align Horizontally"
+            >
+              <AlignCenterHorizontal className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => alignSelected('vertical')}
+              disabled={selectedIds.size < 2}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-30"
+              title="Align Vertically"
+            >
+              <AlignCenterVertical className="w-4 h-4" />
+            </button>
+            
+            <button
+              onClick={() => setSnapToGrid(!snapToGrid)}
+              className={`p-2 rounded-lg transition-colors ${snapToGrid ? 'text-blue-400 bg-blue-600/20' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
+              title={`Snap to Grid (${snapToGrid ? 'ON' : 'OFF'})`}
+            >
+              <Move className="w-4 h-4" />
             </button>
             
             <button
@@ -598,17 +900,27 @@ const WorkspaceCanvas = () => {
             <div className="h-6 w-px bg-gray-600"></div>
             <button
               onClick={exportAsPNG}
-              className="flex items-center space-x-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              className="flex items-center space-x-1 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+              title="Export as PNG"
             >
-              <Download className="w-4 h-4" />
+              <Image className="w-4 h-4" />
               <span>PNG</span>
             </button>
             <button
               onClick={exportAsJSON}
-              className="flex items-center space-x-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="flex items-center space-x-1 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+              title="Export as JSON"
             >
-              <Download className="w-4 h-4" />
+              <FileJson className="w-4 h-4" />
               <span>JSON</span>
+            </button>
+            <button
+              onClick={exportAsPDF}
+              className="flex items-center space-x-1 px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm"
+              title="Export as PDF"
+            >
+              <FileText className="w-4 h-4" />
+              <span>PDF</span>
             </button>
           </div>
         </div>
@@ -948,7 +1260,7 @@ const WorkspaceCanvas = () => {
 
           {/* Canvas */}
           <div className="flex-1 bg-gray-900 overflow-hidden relative">
-            <div className="flex items-center justify-center h-full p-8">
+            <div className="flex items-start justify-center h-full pt-4 px-4 pb-4">
               <div 
                 className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 relative overflow-hidden"
                 style={{
@@ -1005,8 +1317,10 @@ const WorkspaceCanvas = () => {
                     stage.batchDraw();
                   }}
                   onMouseDown={(e) => {
+                    // Click on empty stage = deselect all
                     if (e.target === e.target.getStage()) {
                       setSelectedObject(null);
+                      setSelectedIds(new Set());
                       setShowProperties(false);
                     }
                   }}
@@ -1036,10 +1350,10 @@ const WorkspaceCanvas = () => {
                         <Text
                           x={getCanvasSize().width / 2}
                           y={getCanvasSize().height / 2 + 30}
-                          text="Or use the component toolbar above to add elements manually"
+                          text="Or use the component toolbar above · Ctrl+Z/Y undo/redo · Arrow keys nudge"
                           fontSize={14}
                           fill="#9ca3af"
-                          offsetX={200}
+                          offsetX={230}
                           offsetY={7}
                         />
                       </>
@@ -1048,11 +1362,30 @@ const WorkspaceCanvas = () => {
                         <KonvaComponent
                           key={component.id}
                           component={component}
-                          isSelected={selectedObject?.id === component.id}
+                          isSelected={selectedIds.has(component.id) || selectedObject?.id === component.id}
                           onSelect={setSelectedObject}
                         />
                       ))
                     )}
+                    
+                    {/* Transformer for resize/rotate handles */}
+                    <Transformer
+                      ref={transformerRef}
+                      boundBoxFunc={(oldBox, newBox) => {
+                        // Minimum size constraint
+                        if (newBox.width < 20 || newBox.height < 20) return oldBox;
+                        return newBox;
+                      }}
+                      anchorSize={8}
+                      anchorCornerRadius={2}
+                      borderStroke="#3b82f6"
+                      borderStrokeWidth={1}
+                      anchorStroke="#3b82f6"
+                      anchorFill="#ffffff"
+                      enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']}
+                      rotateEnabled={true}
+                      rotateAnchorOffset={20}
+                    />
                   </Layer>
                 </Stage>
               </div>
@@ -1459,6 +1792,49 @@ const WorkspaceCanvas = () => {
                   <Trash2 className="w-4 h-4" />
                   <span>Delete Component</span>
                 </button>
+              </div>
+
+              {/* Layers Panel */}
+              <div className="space-y-3 pt-4 border-t border-gray-600">
+                <h4 className="text-sm font-medium text-gray-200 flex items-center justify-between">
+                  <span>Layers ({wireframeComponents.length})</span>
+                  <span className="text-xs text-gray-500">{selectedIds.size > 1 ? `${selectedIds.size} selected` : ''}</span>
+                </h4>
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {wireframeComponents.slice().reverse().map(comp => (
+                    <div
+                      key={comp.id}
+                      className={`flex items-center justify-between px-2 py-1.5 rounded text-xs cursor-pointer transition-colors ${
+                        selectedIds.has(comp.id) || selectedObject?.id === comp.id
+                          ? 'bg-blue-600/30 text-blue-200'
+                          : 'text-gray-300 hover:bg-gray-700'
+                      }`}
+                      onClick={() => {
+                        setSelectedObject(comp);
+                        setSelectedIds(new Set([comp.id]));
+                        setShowProperties(true);
+                      }}
+                    >
+                      <span className="truncate flex-1">{comp.type}: {(comp.text || '').slice(0, 15)}</span>
+                      <div className="flex items-center space-x-1 ml-2">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); toggleLock(comp.id); }}
+                          className={`p-0.5 rounded ${lockedIds.has(comp.id) ? 'text-yellow-400' : 'text-gray-500 hover:text-gray-300'}`}
+                          title={lockedIds.has(comp.id) ? 'Unlock' : 'Lock'}
+                        >
+                          {lockedIds.has(comp.id) ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); toggleVisibility(comp.id); }}
+                          className={`p-0.5 rounded ${hiddenIds.has(comp.id) ? 'text-red-400' : 'text-gray-500 hover:text-gray-300'}`}
+                          title={hiddenIds.has(comp.id) ? 'Show' : 'Hide'}
+                        >
+                          {hiddenIds.has(comp.id) ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>

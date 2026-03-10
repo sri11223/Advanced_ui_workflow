@@ -219,7 +219,7 @@ class WireframeSession {
 // Enhanced wireframe generation endpoint for chat interface
 app.post("/api/wireframe/generate", async (req, res) => {
   try {
-    const { prompt, sessionId, existingWireframe } = req.body;
+    const { prompt, sessionId, existingWireframe, conversationHistory } = req.body;
 
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required" });
@@ -241,18 +241,44 @@ app.post("/api/wireframe/generate", async (req, res) => {
     const session = conversationSessions.get(currentSessionId);
     session.addMessage('user', prompt);
 
+    // Restore conversation history from frontend if session is fresh
+    if (conversationHistory && session.messages.length <= 1) {
+      for (const msg of conversationHistory) {
+        if (msg.role && msg.content) {
+          session.addMessage(msg.role === 'user' ? 'user' : 'assistant', msg.content);
+        }
+      }
+    }
+
+    // If frontend sent an existing wireframe but session doesn't have one, restore it
+    if (existingWireframe && !session.currentWireframe) {
+      session.setWireframe(existingWireframe);
+      if (session.sessionState === 'initial') {
+        session.updateState('generating');
+      }
+    }
+
     // Detect request type - Enhanced modification detection
-    const modificationKeywords = ['change', 'modify', 'update', 'add', 'remove', 'color', 'make', 'improve', 'enhance'];
+    const modificationKeywords = ['change', 'modify', 'update', 'add', 'remove', 'color', 'make it', 'improve', 'enhance', 
+      'move', 'resize', 'replace', 'swap', 'bigger', 'smaller', 'darker', 'lighter', 'align', 'center',
+      'put', 'place', 'shift', 'adjust', 'fix', 'rearrange', 'reorder'];
     const newWireframeKeywords = ['create', 'build', 'design', 'generate', 'new', 'page for', 'login page', 'dashboard', 'homepage'];
     
-    // Check if it's explicitly a new wireframe request
-    const isNewWireframeRequest = newWireframeKeywords.some(keyword => 
-      prompt.toLowerCase().includes(keyword)
-    );
+    const lowerPrompt = prompt.toLowerCase();
     
-    const isModificationRequest = !isNewWireframeRequest && modificationKeywords.some(keyword => 
-      prompt.toLowerCase().includes(keyword)
-    ) && (existingWireframe || session.currentWireframe);
+    // Has existing wireframe context?
+    const hasExistingContext = existingWireframe || session.currentWireframe;
+    
+    // Modification keywords take priority when there's existing context
+    const hasModificationIntent = modificationKeywords.some(keyword => lowerPrompt.includes(keyword));
+    const hasNewWireframeIntent = newWireframeKeywords.some(keyword => lowerPrompt.includes(keyword));
+    
+    // If we have an existing wireframe and the user uses modification words, it's a modification
+    // EVEN if they also use words like "make" (e.g., "make the header blue")
+    const isModificationRequest = hasExistingContext && hasModificationIntent;
+    
+    // Only create a brand new wireframe if there's NO existing context or explicit new intent without modification
+    const isNewWireframeRequest = !isModificationRequest && hasNewWireframeIntent;
 
     // Detect multi-page website requests - Enhanced detection
     const ecommerceKeywords = ['ecommerce', 'e-commerce', 'shop', 'store', 'product', 'cart', 'checkout', 'buy', 'sell'];
@@ -304,8 +330,8 @@ app.post("/api/wireframe/generate", async (req, res) => {
     // Enhanced modification detection - check for existing wireframe from frontend
     const hasExistingWireframe = existingWireframe && (existingWireframe.components || existingWireframe.pages);
     
-    // Only treat as modification if it's NOT a new wireframe request AND has existing wireframe
-    const enhancedModificationRequest = isModificationRequest && !isNewWireframeRequest && hasExistingWireframe;
+    // Treat as modification when there's modification intent AND an existing wireframe
+    const enhancedModificationRequest = isModificationRequest && (hasExistingWireframe || session.currentWireframe);
 
     if (enhancedModificationRequest && (session.currentWireframe || hasExistingWireframe)) {
       // Handle contextual modifications
@@ -316,8 +342,14 @@ app.post("/api/wireframe/generate", async (req, res) => {
       // Use existing wireframe from frontend if available, otherwise use session wireframe
       const baseWireframe = hasExistingWireframe ? existingWireframe : session.currentWireframe;
       
+      // Pass conversation history for context-aware modifications
+      const conversationContext = session.messages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .slice(-8)
+        .map(m => ({ role: m.role, content: m.content }));
+      
       const { modifyWireframe } = require('./chatbot');
-      const modifiedWireframe = await modifyWireframe(prompt, baseWireframe);
+      const modifiedWireframe = await modifyWireframe(prompt, baseWireframe, conversationContext);
       session.setWireframe(modifiedWireframe);
       
       const suggestions = generateModificationSuggestions(prompt, modifiedWireframe);
@@ -382,27 +414,127 @@ app.post("/api/wireframe/generate", async (req, res) => {
       // Transform the wireframe to match the expected format
       let transformedWireframe;
       
-      // Transform wireframe components to match frontend expectations
-      const transformComponents = (components) => {
-        return components.map((comp, index) => ({
-          id: comp.id || `comp-${Date.now()}-${index}`,
-          type: comp.type || 'text',
-          x: comp.x || 50,
-          y: comp.y || 50 + (index * 70),
-          width: comp.width || (comp.type === 'button' ? 200 : comp.type === 'input' ? 260 : 300),
-          height: comp.height || (comp.type === 'button' ? 40 : comp.type === 'input' ? 40 : 30),
-          text: comp.label || comp.text || comp.placeholder || `Component ${index + 1}`,
-          fill: comp.backgroundColor || (comp.type === 'button' ? '#3b82f6' : comp.type === 'input' ? '#ffffff' : '#f3f4f6'),
-          textColor: comp.textColor || (comp.type === 'button' ? '#ffffff' : '#374151'),
-          fontSize: comp.fontSize || 14,
-          fontWeight: comp.fontWeight || 'normal',
-          borderColor: comp.borderColor || '#d1d5db',
-          borderWidth: comp.borderWidth || 1,
-          borderRadius: comp.borderRadius || (comp.type === 'button' ? 6 : 4),
-          opacity: comp.opacity || 1,
-          placeholder: comp.placeholder
-        }));
+      // Smart layout: detect layout type and position components properly
+      const transformComponents = (components, canvasWidth = 1200) => {
+        if (!components || components.length === 0) return [];
+        
+        // Analyze x-position clusters to detect layout type
+        const xPositions = components.map(c => c.x || 0).sort((a, b) => a - b);
+        const xClusters = [];
+        for (const x of xPositions) {
+          if (!xClusters.some(cx => Math.abs(cx - x) < 40)) {
+            xClusters.push(x);
+          }
+        }
+        
+        // Form/single-column layout: 1-2 x position clusters
+        const isFormLayout = xClusters.length <= 2;
+        
+        if (isFormLayout) {
+          return layoutAsForm(components, canvasWidth);
+        }
+        return layoutPreserveRelative(components, canvasWidth);
       };
+      
+      // Center components in a clean form layout
+      function layoutAsForm(components, canvasWidth) {
+        const formWidth = 420;
+        const startX = Math.round((canvasWidth - formWidth) / 2);
+        let currentY = 80;
+        
+        return components.map((comp, index) => {
+          const type = comp.type || 'text';
+          const fontSize = parseInt(comp.fontSize) || 14;
+          const textContent = comp.label || comp.text || '';
+          
+          // Detect component role
+          const isTitle = type === 'text' && (fontSize >= 20 || comp.fontWeight === 'bold');
+          const nextComp = components[index + 1];
+          const isLabel = type === 'text' && !isTitle && nextComp && nextComp.type === 'input';
+          
+          // Determine height based on role
+          let height;
+          if (isTitle) height = 44;
+          else if (isLabel) height = 22;
+          else if (type === 'input') height = 46;
+          else if (type === 'button') height = 50;
+          else height = 28;
+          
+          const y = currentY;
+          
+          // Context-aware vertical spacing
+          if (isTitle) {
+            currentY += height + 32;
+          } else if (isLabel) {
+            currentY += height + 6;
+          } else if (type === 'input') {
+            currentY += height + 20;
+          } else if (type === 'button') {
+            currentY += height + 16;
+          } else {
+            currentY += height + 14;
+          }
+          
+          return {
+            id: comp.id || `comp-${Date.now()}-${index}`,
+            type,
+            x: startX,
+            y,
+            width: formWidth,
+            height,
+            text: comp.label || comp.text || comp.placeholder || `Component ${index + 1}`,
+            fill: type === 'button' ? (comp.backgroundColor || '#3b82f6') :
+                  type === 'input' ? (comp.backgroundColor || '#ffffff') : null,
+            textColor: comp.textColor || (type === 'button' ? '#ffffff' : '#374151'),
+            fontSize: isTitle ? Math.max(fontSize, 28) : (type === 'button' ? 16 : fontSize),
+            fontWeight: comp.fontWeight || ((isTitle || type === 'button') ? 'bold' : 'normal'),
+            textAlign: isTitle ? 'center' : 'left',
+            borderColor: type === 'input' ? (comp.borderColor || '#d1d5db') : undefined,
+            borderWidth: type === 'input' ? (comp.borderWidth || 1) : 0,
+            borderRadius: comp.borderRadius || (type === 'button' ? 8 : type === 'input' ? 6 : 0),
+            opacity: comp.opacity || 1,
+            placeholder: comp.placeholder
+          };
+        });
+      }
+      
+      // Preserve relative positions for complex multi-column layouts, centered on canvas
+      function layoutPreserveRelative(components, canvasWidth) {
+        let minCX = Infinity, maxCX = 0;
+        components.forEach(c => {
+          const x = c.x || 0;
+          const w = c.width || 200;
+          if (x < minCX) minCX = x;
+          if (x + w > maxCX) maxCX = x + w;
+        });
+        
+        const contentWidth = maxCX - minCX;
+        const offsetX = contentWidth > 0 ? Math.round((canvasWidth - contentWidth) / 2 - minCX) : 50;
+        
+        return components.map((comp, index) => {
+          const type = comp.type || 'text';
+          return {
+            id: comp.id || `comp-${Date.now()}-${index}`,
+            type,
+            x: Math.round((comp.x || 50) + Math.max(0, offsetX)),
+            y: comp.y || 50 + (index * 70),
+            width: comp.width || (type === 'button' ? 200 : type === 'input' ? 260 : 300),
+            height: comp.height || (type === 'button' ? 44 : type === 'input' ? 44 : 30),
+            text: comp.label || comp.text || comp.placeholder || `Component ${index + 1}`,
+            fill: type === 'button' ? (comp.backgroundColor || '#3b82f6') :
+                  type === 'input' ? (comp.backgroundColor || '#ffffff') :
+                  (comp.backgroundColor || null),
+            textColor: comp.textColor || (type === 'button' ? '#ffffff' : '#374151'),
+            fontSize: comp.fontSize || 14,
+            fontWeight: comp.fontWeight || 'normal',
+            borderColor: comp.borderColor || '#d1d5db',
+            borderWidth: comp.borderWidth || 1,
+            borderRadius: comp.borderRadius || (type === 'button' ? 6 : 4),
+            opacity: comp.opacity || 1,
+            placeholder: comp.placeholder
+          };
+        });
+      }
 
       if (wireframe && wireframe.json) {
         // Handle multi-page wireframes
@@ -444,26 +576,26 @@ app.post("/api/wireframe/generate", async (req, res) => {
               {
                 id: 'header-1',
                 type: 'text',
-                x: 50,
-                y: 50,
-                width: 300,
-                height: 40,
-                text: prompt.substring(0, 50) + '...',
-                fill: '#f3f4f6',
+                x: 390,
+                y: 80,
+                width: 420,
+                height: 44,
+                text: prompt.substring(0, 50),
                 textColor: '#374151',
-                fontSize: 18
+                fontSize: 28,
+                fontWeight: 'bold'
               },
               {
                 id: 'button-1',
                 type: 'button',
-                x: 50,
-                y: 120,
-                width: 200,
-                height: 40,
+                x: 390,
+                y: 156,
+                width: 420,
+                height: 50,
                 text: 'Action Button',
                 fill: '#3b82f6',
                 textColor: '#ffffff',
-                fontSize: 14
+                fontSize: 16
               }
             ]
           }]
@@ -489,10 +621,10 @@ app.post("/api/wireframe/generate", async (req, res) => {
       const fallbackWireframe = {
         title: "Basic Wireframe",
         canvasWidth: 1200,
-        canvasHeight: 600,
+        canvasHeight: 800,
         components: [
-          { id: 'fallback-1', type: 'text', x: 50, y: 50, width: 300, height: 40, text: 'Wireframe Generation Error', fontSize: 18, fontWeight: 'bold' },
-          { id: 'fallback-2', type: 'text', x: 50, y: 100, width: 500, height: 60, text: 'Please try again with a different prompt.', fontSize: 14 }
+          { id: 'fallback-1', type: 'text', x: 390, y: 80, width: 420, height: 44, text: 'Wireframe Generation Error', fontSize: 28, fontWeight: 'bold' },
+          { id: 'fallback-2', type: 'text', x: 390, y: 156, width: 420, height: 28, text: 'Please try again with a different prompt.', fontSize: 14 }
         ]
       };
       

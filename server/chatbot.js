@@ -99,9 +99,14 @@ async function generateWireframe(prompt) {
       
       IMPORTANT: Your response MUST follow the EXACT structure with a top-level "json" key.
       
-      The Figma plugin in our project ONLY supports a FLAT array of components. It does NOT support nested components 
-      like containers with sub-components. Each component must be at the top level in the components array.
-      The size of the figma frame is 360x720 and position (x, y) of each component should be specified to avoid overlaps.
+      The canvas size is 1200x800 pixels. All form elements (inputs, buttons) must have CONSISTENT width of 420px.
+      Center form elements horizontally: use x=390 for all form fields. Do NOT use varying x positions.
+      Stack components vertically with proper spacing: 20px between form groups, 6px between label and its input.
+      Title text should use fontSize 28 and fontWeight "bold".
+      Labels should use fontSize 14 immediately before their input field.
+      
+      Components MUST be in a FLAT array (no nested components or containers).
+      Use ONLY these component types: "text", "input", "button".
 
       Generate ONLY a JSON object with the following structure (no explanation, just the JSON):
       {{
@@ -110,28 +115,39 @@ async function generateWireframe(prompt) {
           "components": [
             {{
               "type": "text",
-              "label": "Text Label",
-              "x": 150,
-              "y": 50,
-              "fontSize": 24,
+              "label": "Screen Title",
+              "x": 390,
+              "y": 80,
+              "width": 420,
+              "height": 44,
+              "fontSize": 28,
               "fontWeight": "bold"
+            }},
+            {{
+              "type": "text",
+              "label": "Field Label",
+              "x": 390,
+              "y": 156,
+              "width": 420,
+              "fontSize": 14
             }},
             {{
               "type": "input",
               "label": "Input Label",
-              "x": 50,
-              "y": 120,
-              "width": 300,
-              "height": 40,
+              "x": 390,
+              "y": 178,
+              "width": 420,
+              "height": 46,
               "placeholder": "Placeholder Text"
             }},
             {{
               "type": "button",
               "label": "Button Text",
-              "x": 50,
-              "y": 280,
-              "width": 300,
-              "backgroundColor": "#337ab7",
+              "x": 390,
+              "y": 340,
+              "width": 420,
+              "height": 50,
+              "backgroundColor": "#3b82f6",
               "textColor": "#ffffff"
             }}
           ]
@@ -144,7 +160,9 @@ async function generateWireframe(prompt) {
       3. ALL components must be in a FLAT array (no nested components or containers)
       4. Button components must use "label" for the button text (not "text")
       5. DO NOT include any explanation text before or after the JSON
-      6. Ensure the JSON is valid and properly formatted`
+      6. Ensure the JSON is valid and properly formatted
+      7. ALL form elements MUST use x=390 and width=420 for consistent alignment
+      8. Use fontSize 28 + fontWeight "bold" for titles, fontSize 14 for labels`
     );
 
     const wireframePrompt = await wireframeTemplate.format({
@@ -188,11 +206,11 @@ async function generateWireframe(prompt) {
             id: "title",
             type: "text",
             text: "Login",
-            x: 200,
-            y: 50,
-            width: 200,
-            height: 40,
-            fontSize: 24,
+            x: 390,
+            y: 80,
+            width: 420,
+            height: 44,
+            fontSize: 28,
             fontWeight: "bold",
             textAlign: "center"
           },
@@ -200,53 +218,54 @@ async function generateWireframe(prompt) {
             id: "email-label",
             type: "text",
             text: "Email",
-            x: 50,
-            y: 120,
-            width: 100,
-            height: 20,
+            x: 390,
+            y: 156,
+            width: 420,
+            height: 22,
             fontSize: 14
           },
           {
             id: "email-input",
             type: "input",
             placeholder: "Enter your email",
-            x: 50,
-            y: 145,
-            width: 300,
-            height: 40,
-            borderColor: "#ccc",
+            x: 390,
+            y: 184,
+            width: 420,
+            height: 46,
+            borderColor: "#d1d5db",
             borderWidth: 1
           },
           {
             id: "password-label",
             type: "text",
             text: "Password",
-            x: 50,
-            y: 200,
-            width: 100,
-            height: 20,
+            x: 390,
+            y: 250,
+            width: 420,
+            height: 22,
             fontSize: 14
           },
           {
             id: "password-input",
             type: "input",
             placeholder: "Enter your password",
-            x: 50,
-            y: 225,
-            width: 300,
-            height: 40,
-            borderColor: "#ccc",
+            x: 390,
+            y: 278,
+            width: 420,
+            height: 46,
+            borderColor: "#d1d5db",
             borderWidth: 1
           },
           {
             id: "login-button",
             type: "button",
             text: "Login",
-            x: 50,
-            y: 285,
-            width: 300,
-            height: 45,
-            fill: "#007bff",
+            x: 390,
+            y: 360,
+            width: 420,
+            height: 50,
+            fill: "#3b82f6",
+            backgroundColor: "#3b82f6",
             textColor: "#ffffff",
             fontSize: 16,
             fontWeight: "bold"
@@ -407,7 +426,7 @@ async function generateWireframe(prompt) {
       // Attempt recovery with a simpler prompt
       console.log("Attempting recovery with simpler prompt");
       try {
-        const simplePrompt = `Create a JSON wireframe for a "${prompt}" screen. IMPORTANT: The response MUST have a top-level "json" key containing "title" and "components" array. Example: {"json": {"title": "Screen Title", "components": [{"type": "text", "label": "Text", "x": 50, "y": 50}]}}`;
+        const simplePrompt = `Create a JSON wireframe for a "${prompt}" screen. Canvas is 1200x800. Center all elements at x=390 with width=420. IMPORTANT: The response MUST have a top-level "json" key containing "title" and "components" array. Example: {"json": {"title": "Screen Title", "components": [{"type": "text", "label": "Title", "x": 390, "y": 80, "width": 420, "fontSize": 28, "fontWeight": "bold"}]}}`;
         const fallbackResponse = await llmClient.invoke(simplePrompt, {
           skipCache: true,
         });
@@ -430,27 +449,29 @@ async function generateWireframe(prompt) {
                 {
                   type: "text",
                   label: `${prompt} Screen`,
-                  x: 150,
-                  y: 50,
-                  fontSize: 24,
+                  x: 390,
+                  y: 80,
+                  width: 420,
+                  fontSize: 28,
                   fontWeight: "bold",
                 },
                 {
                   type: "input",
                   label: "Input Field",
-                  x: 50,
-                  y: 120,
-                  width: 300,
-                  height: 40,
+                  x: 390,
+                  y: 156,
+                  width: 420,
+                  height: 46,
                   placeholder: "Enter text",
                 },
                 {
                   type: "button",
                   label: "Submit",
-                  x: 50,
-                  y: 200,
-                  width: 300,
-                  backgroundColor: "#337ab7",
+                  x: 390,
+                  y: 222,
+                  width: 420,
+                  height: 50,
+                  backgroundColor: "#3b82f6",
                   textColor: "#ffffff",
                 },
               ],
@@ -470,36 +491,38 @@ async function generateWireframe(prompt) {
               {
                 type: "text",
                 label: `${prompt} Screen`,
-                x: 150,
-                y: 50,
-                fontSize: 24,
+                x: 390,
+                y: 80,
+                width: 420,
+                fontSize: 28,
                 fontWeight: "bold",
               },
               {
                 type: "input",
                 label: "Input Field 1",
-                x: 50,
-                y: 120,
-                width: 300,
-                height: 40,
+                x: 390,
+                y: 156,
+                width: 420,
+                height: 46,
                 placeholder: "Enter text",
               },
               {
                 type: "input",
                 label: "Input Field 2",
-                x: 50,
-                y: 180,
-                width: 300,
-                height: 40,
+                x: 390,
+                y: 222,
+                width: 420,
+                height: 46,
                 placeholder: "Enter text",
               },
               {
                 type: "button",
                 label: "Submit",
-                x: 50,
-                y: 240,
-                width: 300,
-                backgroundColor: "#337ab7",
+                x: 390,
+                y: 288,
+                width: 420,
+                height: 50,
+                backgroundColor: "#3b82f6",
                 textColor: "#ffffff",
               },
             ],
@@ -836,7 +859,7 @@ async function closeLLMClient() {
 }
 
 // Function to modify existing wireframe using AI
-async function modifyWireframe(prompt, existingWireframe) {
+async function modifyWireframe(prompt, existingWireframe, conversationContext) {
   try {
     if (!retriever || !llmClient) {
       console.log("LLM client not available, using rule-based modification");
@@ -845,8 +868,15 @@ async function modifyWireframe(prompt, existingWireframe) {
 
     console.log("🔄 Using AI to modify wireframe");
     
+    // Build conversation context string
+    let contextStr = '';
+    if (conversationContext && conversationContext.length > 0) {
+      contextStr = '\nCONVERSATION HISTORY (for context):\n' + 
+        conversationContext.map(m => `${m.role}: ${m.content}`).join('\n') + '\n';
+    }
+    
     const modificationPrompt = `You are a wireframe modification expert. I have an existing wireframe and need to modify it based on a user request.
-
+${contextStr}
 EXISTING WIREFRAME:
 ${JSON.stringify(existingWireframe, null, 2)}
 
@@ -864,6 +894,7 @@ Guidelines:
 - ALIGNMENT: For "center", "left", "right" - adjust x coordinates accordingly
 - Maintain the same JSON structure and component IDs where possible
 - For new components, generate unique IDs using timestamp: ${Date.now()}
+- Use the conversation history to understand context (e.g., what the user previously built)
 
 LAYOUT EXAMPLES:
 - "make vertical" = stack components vertically (same x, increasing y values)
